@@ -1,0 +1,9 @@
+.DS_Store
+/literature
+*.aux
+*.bcf
+*.log
+*.out
+*.run.xml
+*.synctex.gz
+*.toc

@@ -1,0 +1,81 @@
+\documentclass[12pt, titlepage]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[a4paper, total={16cm, 23cm}, top=3.5cm]{geometry}
+\usepackage{
+    amsmath,
+    amssymb,
+    amsthm,
+    fancyhdr,
+    siunitx,
+    bm,
+}
+\usepackage[dvipsnames]{xcolor}
+\definecolor{linkcolor}{RGB}{51, 54, 142}
+\usepackage[colorlinks=true, allcolors=linkcolor]{hyperref}
+\usepackage[
+    backend=biber,
+    bibstyle=ext-authoryear,
+    citestyle=ext-authoryear-comp,
+    sorting=nyt,
+    uniquename=false,
+    maxbibnames=99,
+    giveninits=true,
+]{biblatex}
+\DeclareFieldFormat[article]{volume}{\mkbibbold{#1}}
+\DeclareFieldFormat[article]{number}{\mkbibparens{#1}}
+\DeclareFieldFormat[article]{pages}{#1}
+\renewcommand*{\volnumdelim}{}
+\renewbibmacro{in:}{}
+
+\pagestyle{fancy}
+\fancyhead{}
+\rhead{Research Proposal}
+\renewcommand{\headrulewidth}{0.5pt}
+
+\setlength{\headheight}{15pt}
+\setlength\parindent{0pt}
+\setlength\parskip{6pt}
+
+\renewcommand{\d}[1]{\mathrm{d}#1}
+\newcommand{\diff}[2]{\frac{\mathrm{d} #1}{\mathrm{d} #2}}
+\newcommand{\ddiff}[2]{\frac{\mathrm{d}^2 #1}{\mathrm{d} {#2}^2}}
+\newcommand{\pdiff}[2]{\frac{\partial #1}{\partial #2}}
+\renewcommand\vec{\bm}
+\newcommand{\uvec}[1]{\vec{\hat{#1}}}
+
+\def\equationautorefname~#1\null{%
+    (#1)\null
+}
+
+\begin{document}
+\begin{titlepage}
+\begin{center}
+    \Huge{\textbf{%
+        Title
+    }} \\
+    \vspace{0.75cm}
+    \Large{\textbf{Honours Research Project Proposal}} \\
+    \vspace{0.75cm}
+    \Large{\textbf{Thomas D. Schanzer}} \\
+    \vspace{6pt}
+    \large{Supervisor: Prof. Steven Sherwood} \\
+    \vspace{0.75cm}
+    \large{%
+        School of Physics and \\
+        Climate Change Research Centre,\\
+        ARC Centre of Excellence for Climate Extremes
+
+        University of New South Wales, Sydney, Australia
+    }
+\end{center}
+\vspace{2cm}
+\tableofcontents
+\end{titlepage}
+
+\newpage
+\pagestyle{fancy}
+\thispagestyle{fancy}
+\section{Introduction}
+f
+
+\end{document}
