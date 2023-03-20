@@ -1,4 +1,4 @@
-\documentclass[12pt, titlepage]{article}
+\documentclass[titlepage]{article}
 \usepackage[utf8]{inputenc}
 \usepackage[a4paper, total={16cm, 23cm}, top=3.5cm]{geometry}
 \usepackage{
@@ -8,6 +8,7 @@
     fancyhdr,
     siunitx,
     bm,
+    lipsum,
 }
 \usepackage[dvipsnames]{xcolor}
 \definecolor{linkcolor}{RGB}{51, 54, 142}
@@ -26,6 +27,7 @@
 \DeclareFieldFormat[article]{pages}{#1}
 \renewcommand*{\volnumdelim}{}
 \renewbibmacro{in:}{}
+\addbibresource{references.bib}
 
 \pagestyle{fancy}
 \fancyhead{}
@@ -50,17 +52,17 @@
 \begin{document}
 \begin{titlepage}
 \begin{center}
-    \Huge{\textbf{%
+    {\Huge \textbf{%
         Title
     }} \\
     \vspace{0.75cm}
-    \Large{\textbf{Honours Research Project Proposal}} \\
+    {\Large\textbf{Honours Research Project Proposal}} \\
     \vspace{0.75cm}
-    \Large{\textbf{Thomas D. Schanzer}} \\
+    {\Large\textbf{Thomas D. Schanzer}} \\
     \vspace{6pt}
-    \large{Supervisor: Prof. Steven Sherwood} \\
+    {\large Supervisor: Prof. Steven Sherwood} \\
     \vspace{0.75cm}
-    \large{%
+    {\large%
         School of Physics and \\
         Climate Change Research Centre,\\
         ARC Centre of Excellence for Climate Extremes
@@ -68,7 +70,15 @@
         University of New South Wales, Sydney, Australia
     }
 \end{center}
-\vspace{2cm}
+\vspace{1cm}
+\begin{center}
+{\large\textbf{Abstract}}
+
+\begin{minipage}{13cm}
+    \lipsum[1]
+\end{minipage}
+\end{center}
+\vspace{1cm}
 \tableofcontents
 \end{titlepage}
 
@@ -76,6 +86,77 @@
 \pagestyle{fancy}
 \thispagestyle{fancy}
 \section{Introduction}
-f
+% how do earth system models work? what do they do? why do we need them?
+The Earth system (including atmosphere, ocean and land) is distinguished both
+in its complexity and its influence on all terrestrial life. If the wellbeing
+of humanity in particular is to be preserved, it is difficult to overstate the
+importance of understanding and predicting this system's behaviour---both
+short-term weather and long-term climate. This understanding and predictive
+skill informs important decisions and government policies that have the
+potential to reduce our vulnerability to extreme events (e.g., floods,
+droughts, fires, tropical cyclones) and long-term climate change, and lessen
+negative human impacts (e.g., greenhouse gas emissions) to sustainable levels.
+
+A significant part of our understanding and predictive skill is derived from
+numerical modelling of the Earth system. Like many other models, these aim
+to predict the time evolution of an initial state (e.g., pressure, temperature,
+wind velocity in the atmosphere) given a set of boundary conditions and
+external forcings.
+% what makes modelling hard? why do we need parametrisation?
+Unfortunately, there are many obstacles to accurate modelling. Arguably the
+most fundamental of these is chaos: even with a perfect model and unlimited
+computing resources, arbitrarily small differences in initial conditions
+grow exponentially. This constrains short-term predictability. Second,
+the Earth system comprises a vast number of interacting components, such as
+water in all three phases, solar radiation and clouds (just to name a few which
+are relevant to atmospheric modelling). In other words, the system is
+high-dimensional. Third, the dynamics occur on a wide spectrum of spatial
+and temporal scales. These range from large-scale, slowly-evolving motions
+such as ocean gyres and the atmospheric Hadley circulation, to mid-scale,
+transient weather systems (termed synoptic-scale) and ocean eddies, to
+small-scale wind gusts, tornadoes, water waves and turbulence. All scales
+and their cross-interactions influence the overall dynamics.
+
+Atmosphere and ocean models solve the differential equations that govern fluid
+flow with a finite spatial and temporal resolution and are therefore only able
+to resolve behaviour whose scale is of the same order of magnitude as the
+resolution or larger. The achievable resolution is constrained by the
+capabilities, availability and cost of modern computing resources. A typical
+atmospheric global climate model has a spatial resolution on the order of
+$\ang{1}$ latitude/longitude, roughly corresponding to the size of the entire
+Greater Sydney area from Katoomba to Bondi. Sub-grid scale features, such as
+invidual clouds, cannot be explicitly resolved, but to ignore them completely
+would introduce unacceptable biases (inaccuracies, relative to observations)
+in the model output. The same is true for the numerous components of the
+Earth system that influence the fluid dynamics but are not directly predicted
+by the fluid equations, such as solar radiation and land interactions (e.g.,
+moisture and heat fluxes from vegetation, soil and water bodies).
+
+% how has parametrisation been done historically?
+The process of using the information available in the model to estimate the
+effect of these unresolved processes on the coarse-scale variables is known as
+\emph{parametrisation}, which will be the topic of the thesis. Traditional
+parametrisations are often based on heavily simplified conceptual models of the
+processes in question. For example, the Community Atmosphere Model
+\parencite{cam5} parametrises atmospheric convection by considering an
+ensemble of rising updraft plumes, making assumptions about their mass flux
+and initiation conditions \parencite{zhang1995}. It is now known that these
+methods may under-predict the variance and extreme values of their outputs
+(e.g., precipitation). % citation needed! see Shamekh et al.
+This is detrimental to predictions of future climate and climate extremes.
+
+% what are the limitations of traditional methods?
+% what work has been done to resolve these issues?
+% how much success has there been?
+% what problems remain to be solved?
+
+% narrow it down: what problem will we solve?
+% brief review of relevant literature - results, strengths, weaknesses
+
+\section{Proposed methods}
+
+% Possible issues
+
+\section{Preliminary results}
 
 \end{document}

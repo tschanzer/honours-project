@@ -245,20 +245,20 @@ Now, the finite difference approximation of the vorticity equation
 \end{aligned}
 \end{equation}
 and similarly for the temperature equation \autoref{eqn:rbc_T},
-\begin{align*}
+\begin{equation} \label{eqn:T_tend}
+\begin{aligned}
     \partial_t T_{ij} &= (\grad \cdot \vec{F}^T)_{ij} \\
     &= \frac{F^{Tx}_{i+1/2,j} - F^{Tx}_{i-1/2,j}}{\Delta x}
     + \frac{F^{Tz}_{i,j+1/2} - F^{Tz}_{i,j-1/2}}{\Delta z}.
-\end{align*}
+\end{aligned}
+\end{equation}
 
 The finite difference form of the Poisson equation \autoref{eqn:rbc_poisson}
 is constructed by defining the components of the streamfunction gradient,
-\begin{equation} \label{eqn:T_tend}
-\begin{aligned}
-    D^{\psi x}{i+1/2,j} &= \frac{\psi_{i+1,j} - \psi_{ij}}{\Delta x}, \\
-    D^{\psi z}{i,j+1/2} &= \frac{\psi_{i,j+1} - \psi_{ij}}{\Delta z}.
-\end{aligned}
-\end{equation}
+\begin{align*}
+    D^{\psi x}_{i+1/2,j} &= \frac{\psi_{i+1,j} - \psi_{ij}}{\Delta x}, \\
+    D^{\psi z}_{i,j+1/2} &= \frac{\psi_{i,j+1} - \psi_{ij}}{\Delta z}.
+\end{align*}
 The Poisson equation then becomes
 \begin{equation} \label{eqn:poisson_discrete}
     \begin{aligned}
