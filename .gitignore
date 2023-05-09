@@ -1,6 +1,7 @@
 .DS_Store
 /literature
 /notes
+/data
 */.ipynb_checkpoints
 *.aux
 *.bcf
