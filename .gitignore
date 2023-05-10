@@ -3,6 +3,7 @@
 /notes
 /data
 */.ipynb_checkpoints
+*.pyc
 *.aux
 *.bcf
 *.log
