@@ -70,7 +70,7 @@ if __name__ == '__main__':
         '--time', type=float, help='Simulation time', required=True,
     )
     argParser.add_argument(
-        '--dt', type=float, help='Timestep in units of 1/Ra', required=True,
+        '--dt', type=float, help='Time step', required=True,
     )
     argParser.add_argument(
         '--out', type=str, help='Output directory', required=True,
@@ -92,5 +92,5 @@ if __name__ == '__main__':
 
     logger.info(
         f'Running for {args.time:.3g} units of simulation time '
-        f'with dt = {args.dt/args.Ra:.3e}')
-    run_dns(solver, args.dt/args.Ra)
+        f'with dt = {args.dt:.3e}')
+    run_dns(solver, args.dt)

@@ -26,12 +26,14 @@ def animate(file, framerate=30, timesteps_per_frame=1):
 
     data = xr.open_dataset(file)
     data['omega'] = data.u.differentiate('z') - data.w.differentiate('x')
+    theta_lim = 2*data.theta.std()
+    omega_lim = 2*data.omega.std()
 
     fig, axes = plt.subplots(2, 1, figsize=(11, 6), sharex=True)
 
     mesh1 = axes[0].pcolormesh(
         data.x, data.z, data.theta.isel(t=0).T, cmap='RdBu_r')
-    mesh1.set_clim(-5e5, 5e5)
+    mesh1.set_clim(-theta_lim, theta_lim)
     fig.colorbar(mesh1, ax=axes[0], label='$\\theta$', pad=0.02, shrink=0.75)
     axes[0].set(ylabel='$z$')
     axes[0].set_aspect('equal')
@@ -39,7 +41,7 @@ def animate(file, framerate=30, timesteps_per_frame=1):
 
     mesh2 = axes[1].pcolormesh(
         data.x, data.z, data.omega.isel(t=0).T, cmap='RdBu_r')
-    mesh2.set_clim(-1e4, 1e4)
+    mesh2.set_clim(-omega_lim, omega_lim)
     fig.colorbar(mesh2, ax=axes[1], label='$\\omega_y$', pad=0.02, shrink=0.75)
     axes[1].set(xlabel='x', ylabel='$z$')
     axes[1].set_aspect('equal')
