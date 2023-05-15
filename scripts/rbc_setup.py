@@ -6,12 +6,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def build_solver(Lx, Nx, Nz, Rayleigh, Prandtl):
+def build_solver(aspect, Nx, Nz, Rayleigh, Prandtl):
     """
     Builds a Dedalus solver for RBC.
 
     Args:
-        Lx: Dimensionless domain length (relative to thickness).
+        aspect: Domain aspect ratio.
         Nx: Number of horizontal modes.
         Nz: Number of vertical modes.
         Rayleigh: Rayleigh number.
@@ -25,20 +25,21 @@ def build_solver(Lx, Nx, Nz, Rayleigh, Prandtl):
     logger.info('Building solver. Parameters:')
     logger.info(f'\tRa = {Rayleigh:.2e}')
     logger.info(f'\tPr = {Prandtl:.3f}')
-    logger.info(f'\tLx = {Lx:.1f}')
+    logger.info(f'\taspect = {aspect:.1f}')
     logger.info(f'\tNx = {Nx:d}')
     logger.info(f'\tNz = {Nz:d}')
 
     # Bases
     coords = d3.CartesianCoordinates('x', 'z')
     dist = d3.Distributor(coords, dtype=np.float64)
-    xbasis = d3.RealFourier(coords['x'], size=Nx, bounds=(0, Lx), dealias=3/2)
+    xbasis = d3.RealFourier(
+        coords['x'], size=Nx, bounds=(0, aspect), dealias=3/2)
     zbasis = d3.ChebyshevT(coords['z'], size=Nz, bounds=(0, 1), dealias=3/2)
 
     # Fields
-    pi = dist.Field(name='pi', bases=(xbasis,zbasis))
-    theta = dist.Field(name='theta', bases=(xbasis,zbasis))
-    u = dist.VectorField(coords, name='u', bases=(xbasis,zbasis))
+    pi = dist.Field(name='pi', bases=(xbasis, zbasis))
+    theta = dist.Field(name='theta', bases=(xbasis, zbasis))
+    u = dist.VectorField(coords, name='u', bases=(xbasis, zbasis))
     tau_pi = dist.Field(name='tau_pi')
     tau_theta1 = dist.Field(name='tau_theta1', bases=xbasis)
     tau_theta2 = dist.Field(name='tau_theta2', bases=xbasis)
@@ -60,13 +61,13 @@ def build_solver(Lx, Nx, Nz, Rayleigh, Prandtl):
     )
     # Momentum equation
     problem.add_equation(
-        'Prandtl**(-1)*dt(u) - div(grad_u) + grad(pi) - theta*z_hat'
-        ' + lift(tau_u2) = - Prandtl**(-1)*u@grad_u'
+        'Rayleigh/Prandtl*dt(u) - div(grad_u) + grad(pi) - theta*z_hat'
+        ' + lift(tau_u2) = - Rayleigh/Prandtl*u@grad_u'
     )
     # Energy equation
     problem.add_equation(
-        'dt(theta) - div(grad_theta) - Rayleigh*u@z_hat + lift(tau_theta2) '
-        '= -u@grad_theta'
+        'Rayleigh*dt(theta) - div(grad_theta) + lift(tau_theta2) '
+        '= -Rayleigh*u@grad_theta'
     )
     # Continuity equation
     problem.add_equation('trace(grad_u) + tau_pi = 0')
@@ -74,8 +75,8 @@ def build_solver(Lx, Nx, Nz, Rayleigh, Prandtl):
     # No-slip, isothermal boundary conditions
     problem.add_equation('u(z=0) = 0')
     problem.add_equation('u(z=1) = 0')
-    problem.add_equation('theta(z=0) = 0')
-    problem.add_equation('theta(z=1) = 0')
+    problem.add_equation('theta(z=0) = 1/2')
+    problem.add_equation('theta(z=1) = -1/2')
     # Pressure gauge condition
     problem.add_equation('integ(pi) = 0')
 

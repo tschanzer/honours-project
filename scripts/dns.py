@@ -61,7 +61,7 @@ if __name__ == '__main__':
         description=('Runs a direct numerical simulation of RBC.')
     )
     argParser.add_argument(
-        '--Lx', type=float, help='Domain length', required=True)
+        '--aspect', type=float, help='Aspect ratio', required=True)
     argParser.add_argument(
         '--Nx', type=int, help='# horizontal modes', required=True)
     argParser.add_argument(
@@ -85,9 +85,9 @@ if __name__ == '__main__':
     logger.info('Rayleigh-Bénard convection: direct numerical simulation')
 
     solver = rbc_setup.build_solver(
-        args.Lx, args.Nx, args.Nz, args.Ra, args.Pr)
+        args.aspect, args.Nx, args.Nz, args.Ra, args.Pr)
     rbc_setup.set_initial_conditions(
-        solver, 'random_theta', sigma=1e-2*args.Ra)
+        solver, 'random_theta', sigma=1e-2)
     add_file_handler(solver, args.out, args.save, args.coef)
 
     solver.stop_sim_time = args.time
