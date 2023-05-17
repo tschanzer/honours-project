@@ -6,7 +6,8 @@ import argparse
 logger = logging.getLogger(__name__)
 
 
-def add_file_handler(solver, data_dir, save_interval, coefficients=False):
+def add_file_handler(
+        solver, data_dir, save_interval, coefficients=False, tau=False):
     """
     Tells the solver to save output to a file.
 
@@ -16,16 +17,21 @@ def add_file_handler(solver, data_dir, save_interval, coefficients=False):
         save_interval: Number of time steps between saves.
         coefficients: Set to True to also save the coefficient space
             representations of u and theta (default False).
+        tau: Set to True to also record the tau variables (default
+            False).
     """
 
     snapshots = solver.evaluator.add_file_handler(
         data_dir, iter=save_interval, max_writes=1000)
-    snapshots.add_tasks(solver.state, layout='g')
+    u = rbc_setup.get_field(solver, 'u')
+    theta = rbc_setup.get_field(solver, 'theta')
+    if tau:
+        snapshots.add_tasks(solver.state, layout='g')
+    else:
+        snapshots.add_tasks([u, theta], layout='g')
     logger.info(f'Output: {data_dir:s}')
     logger.info(f'Logging interval: {save_interval:d}*dt')
     if coefficients:
-        u = rbc_setup.get_field(solver, 'u')
-        theta = rbc_setup.get_field(solver, 'theta')
         snapshots.add_tasks([u, theta], layout='c', name='coef_')
         logger.info('Coefficient logging enabled')
 
@@ -80,6 +86,8 @@ if __name__ == '__main__':
         '--save', type=int, help='Output interval (# steps)', required=True)
     argParser.add_argument(
         '--coef', action='store_true', help='Store coefficient data')
+    argParser.add_argument(
+        '--tau', action='store_true', help='Store tau variables')
     args = argParser.parse_args()
 
     logger.info('Rayleigh-Bénard convection: direct numerical simulation')
@@ -88,7 +96,7 @@ if __name__ == '__main__':
         args.aspect, args.Nx, args.Nz, args.Ra, args.Pr)
     rbc_setup.set_initial_conditions(
         solver, 'random_theta', sigma=1e-2)
-    add_file_handler(solver, args.out, args.save, args.coef)
+    add_file_handler(solver, args.out, args.save, args.coef, args.tau)
 
     solver.stop_sim_time = args.time
     logger.info(f'Simulation length: t_max = {args.time:.3g}')

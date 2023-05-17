@@ -29,7 +29,7 @@ def animate(file, framerate=30, timesteps_per_frame=1):
     theta_lim = 2*data.theta.std()
     omega_lim = 2*data.omega.std()
 
-    fig, axes = plt.subplots(2, 1, figsize=(11, 6), sharex=True)
+    fig, axes = plt.subplots(2, 1, figsize=(11, 3.5), sharex=True)
 
     mesh1 = axes[0].pcolormesh(
         data.x, data.z, data.theta.isel(t=0).T, cmap='RdBu_r')
@@ -45,12 +45,12 @@ def animate(file, framerate=30, timesteps_per_frame=1):
     fig.colorbar(mesh2, ax=axes[1], label='$\\omega_y$', pad=0.02, shrink=0.75)
     axes[1].set(xlabel='x', ylabel='$z$')
     axes[1].set_aspect('equal')
-    fig.tight_layout(h_pad=-2)
+    fig.tight_layout()
 
     def update(i):
         mesh1.set_array(data.theta.isel(t=i).T)
         mesh2.set_array(data.omega.isel(t=i).T)
-        title.set_text(f'$t$ = {data.t[i]*1e3:.3f} $\\times 10^{{-3}}$')
+        title.set_text(f'$t$ = {data.t[i]*1e-6:.2f} $\\times 10^6$')
         return mesh1, mesh2, title
 
     frames = range(0, data.t.size, timesteps_per_frame)
