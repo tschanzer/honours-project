@@ -148,12 +148,18 @@ def set_initial_conditions(solver, type, **kwargs):
         theta = get_field(solver, 'theta')
         x = get_local_grid(theta, 'x')
         z = get_local_grid(theta, 'z')
+
         k_base = 4
-        k_perturb = 21
+        k_perturb = 41
         aspect = theta.domain.bases_by_axis[0].bounds[1]
-        base_wave = np.cos(2*np.pi*k_base*x/aspect)
-        perturb_wave = np.cos(2*np.pi*k_perturb*(x - 0.25)/aspect)
-        exp = 6 + (base_wave + 0.1*perturb_wave)*np.sign(z - 0.5)
+
+        def exp_term(x):
+            base_wave = np.cos(2*np.pi*k_base*x/aspect)
+            perturb_wave = np.cos(2*np.pi*k_perturb*(x - 0.25)/aspect)
+            mod_wave = np.cos(np.pi*x/2)**4
+            return base_wave + 0.1*perturb_wave*mod_wave
+
+        exp = 6 - np.where(z < 0.5, exp_term(x), exp_term(x - 1))
         theta['g'] = -0.5*np.sign(z - 0.5)*np.abs(2*z - 1)**exp
     else:
         raise ValueError('Invalid initial condition specification.')
