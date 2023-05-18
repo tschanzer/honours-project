@@ -88,6 +88,9 @@ if __name__ == '__main__':
         '--coef', action='store_true', help='Store coefficient data')
     argParser.add_argument(
         '--tau', action='store_true', help='Store tau variables')
+    argParser.add_argument(
+        '--init', choices=['random_theta', 'wavy_theta'],
+        required=True, help='Initial condition')
     args = argParser.parse_args()
 
     logger.info('Rayleigh-Bénard convection: direct numerical simulation')
@@ -95,7 +98,7 @@ if __name__ == '__main__':
     solver = rbc_setup.build_solver(
         args.aspect, args.Nx, args.Nz, args.Ra, args.Pr)
     rbc_setup.set_initial_conditions(
-        solver, 'random_theta', sigma=1e-2)
+        solver, args.init, sigma=1e-2)
     add_file_handler(solver, args.out, args.save, args.coef, args.tau)
 
     solver.stop_sim_time = args.time

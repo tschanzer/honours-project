@@ -143,5 +143,17 @@ def set_initial_conditions(solver, type, **kwargs):
         # Reduce the amplitude of the noise near the walls
         z = get_local_grid(theta, 'z')
         theta['g'] *= 4*z*(1 - z)
+    elif type == 'wavy_theta':
+        logger.info('Initial condition: wavy_theta')
+        theta = get_field(solver, 'theta')
+        x = get_local_grid(theta, 'x')
+        z = get_local_grid(theta, 'z')
+        k_base = 4
+        k_perturb = 21
+        aspect = theta.domain.bases_by_axis[0].bounds[1]
+        base_wave = np.cos(2*np.pi*k_base*x/aspect)
+        perturb_wave = np.cos(2*np.pi*k_perturb*(x - 0.25)/aspect)
+        exp = 6 + (base_wave + 0.1*perturb_wave)*np.sign(z - 0.5)
+        theta['g'] = -0.5*np.sign(z - 0.5)*np.abs(2*z - 1)**exp
     else:
         raise ValueError('Invalid initial condition specification.')
