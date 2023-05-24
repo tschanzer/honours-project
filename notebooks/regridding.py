@@ -8,12 +8,13 @@ import warnings
 
 def bounds(grid):
     """
-    Calculates cell bounds for a 1D coordinate grid with *even* length.
+    Calculates cell bounds for a 1D coordinate grid.
 
     Assumes that points on the coordinate grid are the midpoints of
     the cells and that the first and last cells have equal width.
-    So far, this only works for grids with even length because the
-    problem is underdetermined for odd lengths.
+    If the grid has even length, we additionally assume that the
+    boundary between the first and second grid points is halfway
+    between them (otherwise, the problem would be underdetermined).
 
     Note: this is not, in general, the same as assuming that the cell
     bounds are halfway between points on the coordinate grid.
@@ -28,6 +29,12 @@ def bounds(grid):
     mat = np.eye(grid.size + 1) + np.eye(grid.size + 1, k=1)
     mat[-1, 0] = 1
     rhs = np.concatenate([2*grid, [grid[0] + grid[-1]]])
+
+    if grid.size % 2 == 1:
+        # the matrix is singular
+        mat[0, 0] = 0
+        rhs[0] = 0.5*(grid[0] + grid[1])
+
     return np.linalg.solve(mat, rhs)
 
 
@@ -49,6 +56,7 @@ class Regridder2D(xe.Regridder):
         """
 
         self.coords = coords
+        self.scale_factors = [np.abs(lowres[coord]).max() for coord in coords]
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 'ignore', message=r'Latitude is outside of \[-90, 90\]')
@@ -86,7 +94,12 @@ class Regridder2D(xe.Regridder):
             xarray.Dataset or DataArray with renamed coordinates.
         """
 
-        return data.rename({self.coords[0]: 'lat', self.coords[1]: 'lon'})
+        data = data.rename({self.coords[0]: 'lat', self.coords[1]: 'lon'})
+        # we need to rescale the coordinates because xESMF doesn't like
+        # it when abs(lon) > 180 or abs(lat) > 90 ...
+        data['lat'] = data['lat']/self.scale_factors[0]
+        data['lon'] = data['lon']/self.scale_factors[1]
+        return data
 
     def _latlon_to_coords(self, data):
         """
@@ -99,6 +112,9 @@ class Regridder2D(xe.Regridder):
             xarray.Dataset or DataArray with original coordinate names.
         """
 
+        # first undo the rescaling
+        data['lat'] = data['lat']*self.scale_factors[0]
+        data['lon'] = data['lon']*self.scale_factors[1]
         return data.rename({'lat': self.coords[0], 'lon': self.coords[1]})
 
     def _prep_regrid(self, data):
@@ -114,6 +130,7 @@ class Regridder2D(xe.Regridder):
         """
 
         data = self._coords_to_latlon(data)
+        data = self._check_dataset(data)
         data = data.assign_coords({
             'lat_b': bounds(data.lat.data),
             'lon_b': bounds(data.lon.data),
@@ -143,6 +160,27 @@ class Regridder2D(xe.Regridder):
             data.dtypes if isinstance(data, xr.Dataset) else data.dtype,
             order='C',
         )
+        return data
+
+    def _check_dataset(self, data):
+        """
+        Converts DataArrays to coordinate Datasets.
+
+        This is needed because xarray cannot assign coordinates with
+        new dimensions to DataArrays.
+
+        Args:
+            data: xarray.Dataset or DataArray with 'lat' and 'lon'
+                coordinates.
+
+        Returns:
+            An xarray.Dataset with the coordinate data if the input
+            is a DataArray, and the input otherwise.
+        """
+
+        if isinstance(data, xr.DataArray):
+            data = xr.Dataset({'lat': data.lat, 'lon': data.lon})
+
         return data
 
 
@@ -188,6 +226,7 @@ class Regridder1D(Regridder2D):
     def _prep_regrid(self, data):
         """Equivalent of Regridder2D._prep_regrid for 1D regridding."""
         data = self._coords_to_latlon(data)
+        data = self._check_dataset(data)
         data = data.assign_coords({
             'lat_b': bounds(data.lat.data),
             'lon_b': [-1/2, 1/2],
