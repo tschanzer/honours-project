@@ -8,10 +8,13 @@ import warnings
 
 def bounds(grid):
     """
-    Calculates cell bounds for a 1D coordinate grid.
+    Calculates cell bounds for a 1D coordinate grid with *even* length.
 
     Assumes that points on the coordinate grid are the midpoints of
     the cells and that the first and last cells have equal width.
+    So far, this only works for grids with even length because the
+    problem is underdetermined for odd lengths.
+
     Note: this is not, in general, the same as assuming that the cell
     bounds are halfway between points on the coordinate grid.
 
