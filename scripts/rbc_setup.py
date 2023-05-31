@@ -50,7 +50,11 @@ def build_solver(aspect, Nx, Nz, Rayleigh, Prandtl):
     x, z = dist.local_grids(xbasis, zbasis)
     _, z_hat = coords.unit_vector_fields(dist)
     lift_basis = zbasis.derivative_basis(1)
-    lift = lambda A: d3.Lift(A, lift_basis, -1)
+
+    def lift(A):
+        """Multiplies by the highest Chebyshev polynomial."""
+        return d3.Lift(A, lift_basis, -1)
+
     grad_u = d3.grad(u) - z_hat*lift(tau_u1)
     grad_theta = d3.grad(theta) - z_hat*lift(tau_theta1)
 
@@ -163,3 +167,33 @@ def set_initial_conditions(solver, type, **kwargs):
         theta['g'] = -0.5*np.sign(z - 0.5)*np.abs(2*z - 1)**exp
     else:
         raise ValueError('Invalid initial condition specification.')
+
+
+def add_file_handler(
+        solver, data_dir, save_interval, coefficients=False, tau=False):
+    """
+    Tells the solver to save output to a file.
+
+    Args:
+        solver: Dedalus Solver object.
+        data_dir: Directory for data output.
+        save_interval: Number of time steps between saves.
+        coefficients: Set to True to also save the coefficient space
+            representations of u and theta (default False).
+        tau: Set to True to also record the tau variables (default
+            False).
+    """
+
+    snapshots = solver.evaluator.add_file_handler(
+        data_dir, iter=save_interval, max_writes=1000)
+    u = get_field(solver, 'u')
+    theta = get_field(solver, 'theta')
+    if tau:
+        snapshots.add_tasks(solver.state, layout='g')
+    else:
+        snapshots.add_tasks([u, theta], layout='g')
+    logger.info(f'Output: {data_dir:s}')
+    logger.info(f'Logging interval: {save_interval:d}*dt')
+    if coefficients:
+        snapshots.add_tasks([u, theta], layout='c', name='coef_')
+        logger.info('Coefficient logging enabled')
