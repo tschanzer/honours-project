@@ -57,14 +57,12 @@ class Regridder2D(xe.Regridder):
 
         self.coords = coords
         self.scale_factors = [np.abs(lowres[coord]).max() for coord in coords]
+        highres = self._prep_regrid(highres)
+        lowres = self._prep_regrid(lowres)
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 'ignore', message=r'Latitude is outside of \[-90, 90\]')
-            super().__init__(
-                self._prep_regrid(highres),
-                self._prep_regrid(lowres),
-                'conservative',
-            )
+            super().__init__(highres, lowres, 'conservative')
 
     def __call__(self, data):
         """
@@ -149,6 +147,7 @@ class Regridder2D(xe.Regridder):
             C-contiguous copy of the input with 'lat' and 'lon' as the
             last two dimensions.
         """
+
         dims = list(data.dims)
         if dims[-2:] == ['lat', 'lon']:
             return data
@@ -203,11 +202,13 @@ class Regridder1D(Regridder2D):
 
         self.coord = coord
         self.dummy_coord = 'dummy_' + coord
+        highres = self._add_dummy_coord(highres)
+        lowres = self._add_dummy_coord(lowres)
         super().__init__(highres, lowres, (self.coord, self.dummy_coord))
 
     def _add_dummy_coord(self, data):
         """Adds a length-1 dummy coordinate."""
-        return data.expand_dims({self.dummy_coord: [0]}, axis=-1)
+        return data.expand_dims({self.dummy_coord: [1/2]}, axis=-1)
 
     def _remove_dummy_coord(self, data):
         """Removes the length-1 dummy coordinate."""
@@ -225,11 +226,11 @@ class Regridder1D(Regridder2D):
 
     def _prep_regrid(self, data):
         """Equivalent of Regridder2D._prep_regrid for 1D regridding."""
-        data = self._coords_to_latlon(data)
+        data = super()._coords_to_latlon(data)
         data = self._check_dataset(data)
         data = data.assign_coords({
             'lat_b': bounds(data.lat.data),
-            'lon_b': [-1/2, 1/2],
+            'lon_b': [0., 1.],
         })
         return data
 
@@ -251,6 +252,7 @@ class Regridder3D:
             Modified xesmf.Regridder object that regrids data from the
             `highres` grid onto the `lowres` grid.
         """
+
         self.regridder2d = Regridder2D(highres, lowres, coords[:2])
         self.regridder1d = Regridder1D(highres, lowres, coords[-1])
 
