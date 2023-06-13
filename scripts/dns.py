@@ -3,6 +3,7 @@
 import rbc_setup
 import logging
 import argparse
+import os
 logger = logging.getLogger(__name__)
 
 
@@ -47,6 +48,8 @@ if __name__ == '__main__':
     argParser.add_argument(
         '--Pr', type=float, help='Prandtl number', required=True)
     argParser.add_argument(
+        '--hyper', type=float, help='Hyperviscosity', required=True)
+    argParser.add_argument(
         '--time', type=float, help='Simulation time', required=True)
     argParser.add_argument(
         '--dt', type=float, help='Time step', required=True)
@@ -55,22 +58,33 @@ if __name__ == '__main__':
     argParser.add_argument(
         '--save', type=int, help='Output interval (# steps)', required=True)
     argParser.add_argument(
-        '--coef', action='store_true', help='Store coefficient data')
-    argParser.add_argument(
-        '--tau', action='store_true', help='Store tau variables')
-    argParser.add_argument(
-        '--init', choices=['random_theta', 'wavy_theta'],
+        '--init', choices=['random_theta', 'wavy_theta', 'restart'],
         required=True, help='Initial condition')
+    argParser.add_argument(
+        '--restart-file', help='Restart file (optional)', default=None)
     args = argParser.parse_args()
+
+    if args.init == 'restart':
+        logger.info('')
+        logger.info('RESTART RUN')
+        logger.info('===========')
 
     logger.info('Rayleigh-Bénard convection: direct numerical simulation')
 
     solver = rbc_setup.build_solver(
-        args.aspect, args.Nx, args.Nz, args.Ra, args.Pr)
-    rbc_setup.set_initial_conditions(
-        solver, args.init, sigma=1e-2)
+        args.aspect, args.Nx, args.Nz, args.Ra, args.Pr, args.hyper)
+    rbc_setup.set_initial_conditions(solver, args.init, args.restart_file)
     rbc_setup.add_file_handler(
-        solver, args.out, args.save, args.coef, args.tau)
+        solver, args.out, args.save, args.init == 'restart')
+
+    def restart_schedule(iteration, **_):
+        return iteration == (args.time//(args.save*args.dt))*args.save
+
+    restarts = solver.evaluator.add_file_handler(
+        os.path.join(args.out, 'restart'), custom_schedule=restart_schedule,
+        max_writes=1, mode='append',
+    )
+    restarts.add_tasks(solver.state, layout='g')
 
     solver.stop_sim_time = args.time
     logger.info(f'Simulation length: t_max = {args.time:.3g}')

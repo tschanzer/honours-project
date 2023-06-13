@@ -6,7 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def build_solver(aspect, Nx, Nz, Rayleigh, Prandtl):
+def build_solver(aspect, Nx, Nz, Rayleigh, Prandtl, hyper_coef):
     """
     Builds a Dedalus solver for RBC.
 
@@ -16,6 +16,8 @@ def build_solver(aspect, Nx, Nz, Rayleigh, Prandtl):
         Nz: Number of vertical modes.
         Rayleigh: Rayleigh number.
         Prandtl: Prandtl number.
+        hyper_coef: Dimensionless hyperviscosity coefficient (in units of
+            (layer thickness)^(hyper_order - 2) * (normal kinematic viscosity))
 
     Returns:
         Solver object.
@@ -25,6 +27,7 @@ def build_solver(aspect, Nx, Nz, Rayleigh, Prandtl):
     logger.info('Building solver. Parameters:')
     logger.info(f'\tRa = {Rayleigh:.2e}')
     logger.info(f'\tPr = {Prandtl:.3f}')
+    logger.info(f'\thyperviscosity = {hyper_coef:.3f}')
     logger.info(f'\taspect = {aspect:.1f}')
     logger.info(f'\tNx = {Nx:d}')
     logger.info(f'\tNz = {Nz:d}')
@@ -50,6 +53,8 @@ def build_solver(aspect, Nx, Nz, Rayleigh, Prandtl):
     x, z = dist.local_grids(xbasis, zbasis)
     _, z_hat = coords.unit_vector_fields(dist)
     lift_basis = zbasis.derivative_basis(1)
+    taper = dist.Field(bases=zbasis)
+    taper['g'] = 1 - (2*z - 1)**10
 
     def lift(A):
         """Multiplies by the highest Chebyshev polynomial."""
@@ -65,12 +70,20 @@ def build_solver(aspect, Nx, Nz, Rayleigh, Prandtl):
     )
     # Momentum equation
     problem.add_equation(
-        'Rayleigh/Prandtl*dt(u) - div(grad_u) + grad(pi) - theta*z_hat'
-        ' + lift(tau_u2) = - Rayleigh/Prandtl*u@grad_u'
+        'Rayleigh/Prandtl*dt(u) '
+        '- div(grad_u) '
+        '+ hyper_coef*taper*lap(lap(u))'
+        '+ grad(pi) '
+        '- theta*z_hat '
+        '+ lift(tau_u2) '
+        '= - Rayleigh/Prandtl*u@grad_u'
     )
     # Energy equation
     problem.add_equation(
-        'Rayleigh*dt(theta) - div(grad_theta) + lift(tau_theta2) '
+        'Rayleigh*dt(theta) '
+        '- div(grad_theta) '
+        '+ hyper_coef*taper*lap(lap(theta))'
+        '+ lift(tau_theta2) '
         '= -Rayleigh*u@grad_theta'
     )
     # Continuity equation
@@ -120,29 +133,26 @@ def get_field(solver, name):
     return solver.state[names.index(name)]
 
 
-def set_initial_conditions(solver, type, **kwargs):
+def set_initial_conditions(solver, type, restart_file=None):
     """
     Sets the initial conditions for the solver.
 
     Args:
         solver: Dedalus Solver object.
         type: String specifying the type of initial condition. Options:
-            'random_theta'.
-        **kwargs: Parameters specific to the type of initial condition.
+            'random_theta', 'wavy_theta', 'restart'.
+        restart_file: Path to restart file when type == 'restart'.
     """
 
-    if type == 'random_theta' and 'sigma' in kwargs.keys():
+    if type == 'random_theta':
         # Log the noise amplitude
         logger.info(
-            'Initial condition: random_theta with sigma = '
-            f"{kwargs['sigma']:.3e}"
+            'Initial condition: random_theta with sigma = 1e-2'
         )
 
         # Fill the initial theta array with random noise
         theta = get_field(solver, 'theta')
-        theta.fill_random(
-            'g', distribution='normal', scale=kwargs['sigma'],
-        )
+        theta.fill_random('g', distribution='normal', scale=1e-2)
 
         # Reduce the amplitude of the noise near the walls
         z = get_local_grid(theta, 'z')
@@ -165,12 +175,14 @@ def set_initial_conditions(solver, type, **kwargs):
 
         exp = 6 - np.where(z < 0.5, exp_term(x), exp_term(x - 1))
         theta['g'] = -0.5*np.sign(z - 0.5)*np.abs(2*z - 1)**exp
+    elif type == 'restart' and restart_file:
+        logger.info(f'Initial condition: restart from {restart_file}')
+        solver.load_state(restart_file)
     else:
         raise ValueError('Invalid initial condition specification.')
 
 
-def add_file_handler(
-        solver, data_dir, save_interval, coefficients=False, tau=False):
+def add_file_handler(solver, data_dir, save_interval, restart=False):
     """
     Tells the solver to save output to a file.
 
@@ -178,22 +190,26 @@ def add_file_handler(
         solver: Dedalus Solver object.
         data_dir: Directory for data output.
         save_interval: Number of time steps between saves.
-        coefficients: Set to True to also save the coefficient space
-            representations of u and theta (default False).
-        tau: Set to True to also record the tau variables (default
-            False).
+        restart: Whether or not this is a restart run (default False).
     """
 
+    if restart:
+        def save_schedule(iteration, **_):
+            save = (
+                (iteration % save_interval == 0)
+                and (iteration != solver.initial_iteration)
+            )
+            return save
+    else:
+        def save_schedule(iteration, **_):
+            return iteration % save_interval == 0
+
     snapshots = solver.evaluator.add_file_handler(
-        data_dir, iter=save_interval, max_writes=1000)
+        data_dir, custom_schedule=save_schedule, max_writes=1000,
+        mode=('append' if restart else 'overwrite'),
+    )
     u = get_field(solver, 'u')
     theta = get_field(solver, 'theta')
-    if tau:
-        snapshots.add_tasks(solver.state, layout='g')
-    else:
-        snapshots.add_tasks([u, theta], layout='g')
+    snapshots.add_tasks([u, theta], layout='g')
     logger.info(f'Output: {data_dir:s}')
     logger.info(f'Logging interval: {save_interval:d}*dt')
-    if coefficients:
-        snapshots.add_tasks([u, theta], layout='c', name='coef_')
-        logger.info('Coefficient logging enabled')
