@@ -27,7 +27,7 @@ def build_solver(aspect, Nx, Nz, Rayleigh, Prandtl, hyper_coef):
     logger.info('Building solver. Parameters:')
     logger.info(f'\tRa = {Rayleigh:.2e}')
     logger.info(f'\tPr = {Prandtl:.3f}')
-    logger.info(f'\thyperviscosity = {hyper_coef:.3f}')
+    logger.info(f'\thyperviscosity = {hyper_coef:.2e}')
     logger.info(f'\taspect = {aspect:.1f}')
     logger.info(f'\tNx = {Nx:d}')
     logger.info(f'\tNz = {Nz:d}')

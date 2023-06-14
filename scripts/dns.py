@@ -1,5 +1,7 @@
 """Script to run direct numerical simulations of RBC."""
 
+import dedalus.public as d3
+import numpy as np
 import rbc_setup
 import logging
 import argparse
@@ -16,15 +18,21 @@ def run_dns(solver, timestep):
         timestep: Time step.
     """
 
+    u = rbc_setup.get_field(solver, 'u')
+    flow = d3.GlobalFlowProperty(solver, cadence=100)
+    flow.add_property(u@u, name='magsq_u')
+
     try:
         logger.info(f'Starting main loop with dt = {timestep:.3g}')
         while solver.proceed:
-            if solver.iteration % 1000 == 0:
+            solver.step(timestep)
+            if solver.iteration % 100 == 1:
+                u_rms = np.sqrt(flow.grid_average('magsq_u'))
                 logger.info(
                     f'Iteration {solver.iteration:d}\t\t'
-                    f'Sim time {solver.sim_time:.3e}'
+                    f'Sim time {solver.sim_time:.3e}\t\t'
+                    f'RMS velocity {u_rms:.3e}'
                 )
-            solver.step(timestep)
     except Exception:
         logger.error('Exception raised, triggering end of main loop.')
         raise
