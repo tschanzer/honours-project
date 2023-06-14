@@ -43,8 +43,8 @@ if __name__ == '__main__':
         logger.info('==========')
 
     model = models.BaseModel(
-        aspect=args.aspect, Nx=args.Nx, Nz=args.Nz, Rayleigh=args.Rayleigh,
-        Prandtl=args.Prandtl,
+        aspect=args.aspect, Nx=args.Nx, Nz=args.Nz, Rayleigh=args.Ra,
+        Prandtl=args.Pr,
     )
 
     if args.restart_file:

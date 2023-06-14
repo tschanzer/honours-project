@@ -45,8 +45,8 @@ if __name__ == '__main__':
         logger.info('===========================')
 
     model = models.LinearHyperdiffusionModel(
-        aspect=args.aspect, Nx=args.Nx, Nz=args.Nz, Rayleigh=args.Rayleigh,
-        Prandtl=args.Prandtl, hyper_coef=args.hyper,
+        aspect=args.aspect, Nx=args.Nx, Nz=args.Nz, Rayleigh=args.Ra,
+        Prandtl=args.Pr, hyper_coef=args.hyper,
     )
 
     if args.restart_file:
