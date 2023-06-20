@@ -236,6 +236,9 @@ class BaseModel:
                         f'Sim time {self.solver.sim_time:.3e}\t\t'
                         f'RMS velocity {u_rms:.3e}'
                     )
+                    if np.isnan(u_rms):
+                        logger.error('Model has crashed!')
+                        break
         except Exception:
             logger.error('Exception raised, triggering end of main loop.')
             raise
@@ -259,7 +262,7 @@ class BaseModel:
 
 class LinearHyperdiffusionModel(BaseModel):
     """Model with linear hyperdiffusion."""
-    def __init__(self, *args, hyper_coef):
+    def __init__(self, *args, hyper_coef, **kwargs):
         """
         Builds the solver.
 
@@ -275,7 +278,7 @@ class LinearHyperdiffusionModel(BaseModel):
         logger.info('LinearHyperdiffusionModel parameters:')
         logger.info(f'\thyper_coef = {hyper_coef:.2e}')
         self.hyper_coef = hyper_coef
-        super().__init__(*args)
+        super().__init__(*args, **kwargs)
 
     @property
     def taper(self):
