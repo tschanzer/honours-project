@@ -102,30 +102,27 @@ class BaseModel:
     @property
     def momentum_equation(self):
         """Momentum equation."""
+        nu = np.sqrt(self.Prandtl/self.Rayleigh)
         lhs = (
-            self.Rayleigh/self.Prandtl*d3.dt(self.fields['u'])
-            - d3.div(self.substitutions['grad_u'])
+            d3.dt(self.fields['u'])
+            - nu*d3.div(self.substitutions['grad_u'])
             + d3.grad(self.fields['pi'])
             - self.fields['theta']*self.unit_vectors['z_hat']
             + self.substitutions['lift'](self.fields['tau_u2'])
         )
-        rhs = (
-            -self.Rayleigh/self.Prandtl
-            * self.fields['u']@self.substitutions['grad_u']
-        )
+        rhs = -self.fields['u']@self.substitutions['grad_u']
         return lhs, rhs
 
     @property
     def energy_equation(self):
         """Energy equation."""
+        kappa = 1/np.sqrt(self.Rayleigh*self.Prandtl)
         lhs = (
-            self.Rayleigh*d3.dt(self.fields['theta'])
-            - d3.div(self.substitutions['grad_theta'])
+            d3.dt(self.fields['theta'])
+            - kappa*d3.div(self.substitutions['grad_theta'])
             + self.substitutions['lift'](self.fields['tau_theta2'])
         )
-        rhs = (
-            -self.Rayleigh*self.fields['u']@self.substitutions['grad_theta']
-        )
+        rhs = -self.fields['u']@self.substitutions['grad_theta']
         return lhs, rhs
 
     @property
