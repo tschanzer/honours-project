@@ -49,7 +49,7 @@ def animate(file, framerate=30, timesteps_per_frame=1):
     def update(i):
         mesh1.set_array(data.theta.isel(t=i).T)
         mesh2.set_array(data.omega.isel(t=i).T)
-        title.set_text(f'$t$ = {data.t[i]*1e-6:.2f} $\\times 10^6$')
+        title.set_text(f'$t$ = {data.t[i]:.3f}')
         return mesh1, mesh2, title
 
     frames = range(0, data.t.size, timesteps_per_frame)

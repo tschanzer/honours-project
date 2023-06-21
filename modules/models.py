@@ -314,3 +314,68 @@ class LinearHyperdiffusionModel(BaseModel):
             -self.Rayleigh*self.fields['u']@self.substitutions['grad_theta']
         )
         return lhs, rhs
+
+
+class NonlinearHyperdiffusionModel(BaseModel):
+    """Model with nonlinear hyperdiffusion."""
+    def __init__(self, *args, hyper, **kwargs):
+        """
+        Builds the solver.
+
+        Args:
+            aspect: Domain aspect ratio.
+            Nx: Number of horizontal modes.
+            Nz: Number of vertical modes.
+            Rayleigh: Rayleigh number.
+            Prandtl: Prandtl number.
+            hyper: Dimensionless hyperdiffusivity.
+        """
+
+        logger.info('NonlinearHyperdiffusionModel parameters:')
+        logger.info(f'\thyper = {hyper:.2e}')
+        self.hyper = hyper
+        super().__init__(*args, **kwargs)
+
+    @property
+    def taper(self):
+        """Field that tapers to zero at z = 0 and z = 1."""
+        def taper_func(x):
+            return 56*x**10 - 140*x**12 + 120*x**14 - 35*x**16
+
+        field = self.dist.Field(bases=self.zbasis)
+        field['g'] = 1 - taper_func(2*self.local_grids['z'] - 1)
+        return field
+
+    @property
+    def momentum_equation(self):
+        """Momentum equation."""
+        nu = np.sqrt(self.Prandtl/self.Rayleigh)
+        lap_u = d3.div(self.substitutions['grad_u'])
+        lhs = (
+            d3.dt(self.fields['u'])
+            - nu*lap_u
+            + d3.grad(self.fields['pi'])
+            - self.fields['theta']*self.unit_vectors['z_hat']
+            + self.substitutions['lift'](self.fields['tau_u2'])
+        )
+        rhs = (
+            -self.fields['u']@self.substitutions['grad_u']
+            + nu*self.hyper*self.taper*(lap_u@lap_u)**(1/2)*lap_u
+        )
+        return lhs, rhs
+
+    @property
+    def energy_equation(self):
+        """Energy equation."""
+        kappa = 1/np.sqrt(self.Rayleigh*self.Prandtl)
+        lap_theta = d3.div(self.substitutions['grad_theta'])
+        lhs = (
+            d3.dt(self.fields['theta'])
+            - kappa*lap_theta
+            + self.substitutions['lift'](self.fields['tau_theta2'])
+        )
+        rhs = (
+            -self.fields['u']@self.substitutions['grad_theta']
+            + kappa*self.hyper*self.taper*abs(lap_theta)*lap_theta
+        )
+        return lhs, rhs
