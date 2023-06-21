@@ -32,7 +32,7 @@ def animate(file, framerate=30, timesteps_per_frame=1):
 
     mesh1 = axes[0].pcolormesh(
         data.x, data.z, data.theta.isel(t=0).T, cmap='RdBu_r')
-    mesh1.set_clim(-0.5, 0.5)
+    mesh1.set_clim(-0.38, 0.38)
     fig.colorbar(mesh1, ax=axes[0], label='$\\theta$', pad=0.02, shrink=0.75)
     axes[0].set(ylabel='$z$')
     axes[0].set_aspect('equal')

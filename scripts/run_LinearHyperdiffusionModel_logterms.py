@@ -56,10 +56,16 @@ if __name__ == '__main__':
             (-model.Prandtl/model.Rayleigh*model.hyper_coef*model.taper
              *d3.lap(d3.lap(model.fields['u']))
              ),
+            (-model.Prandtl/model.Rayleigh*model.hyper_coef
+             *d3.lap(d3.lap(model.fields['u']))
+             ),
             -model.Prandtl/model.Rayleigh*d3.grad(model.fields['pi']),
             -model.fields['u']@d3.grad(model.fields['u']),
             1/model.Rayleigh*d3.lap(model.fields['theta']),
             (-1/model.Rayleigh*model.hyper_coef*model.taper
+             *d3.lap(d3.lap(model.fields['theta']))
+             ),
+            (-1/model.Rayleigh*model.hyper_coef
              *d3.lap(d3.lap(model.fields['theta']))
              ),
             -model.fields['u']@d3.grad(model.fields['theta']),
