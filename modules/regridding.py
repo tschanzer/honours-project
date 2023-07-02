@@ -23,6 +23,9 @@ class Regridder:
             affect performance.
         """
 
+        source = self._check_input(source)
+        target = self._check_input(target)
+
         self.dims = dims
         self.source_shape = tuple(source[dim].size for dim in dims)
         self.target_shape = tuple(target[dim].size for dim in dims)
@@ -81,6 +84,14 @@ class Regridder:
             f'  Output grid shape: {target_shape}'
         )
         return info
+
+    def _check_input(self, input_):
+        if isinstance(input_, (xr.DataArray, xr.Dataset)):
+            return input_
+        if isinstance(input_, dict):
+            return xr.DataArray(coords=input_, dims=list(input_.keys()))
+
+        raise ValueError(f'Invalid input type: {type(input_)}')
 
 
 def compute_weights_1d(source, target):

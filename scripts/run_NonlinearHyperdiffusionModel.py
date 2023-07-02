@@ -34,6 +34,12 @@ if __name__ == '__main__':
         '--save', type=int, help='Output interval (# steps)', required=True)
     argParser.add_argument(
         '--restart-file', help='Restart file (optional)', default=None)
+    argParser.add_argument(
+        '--load-file', default=None,
+        help='Existing data file or glob pattern for loading state')
+    argParser.add_argument(
+        '--load-time', help='Sim time of initial condition',
+        type=int, default=None)
     args = argParser.parse_args()
 
     if args.restart_file:
@@ -42,7 +48,7 @@ if __name__ == '__main__':
         logger.info('===========')
     else:
         logger.info('Nonlinear Hyperdiffusion Model')
-        logger.info('===========================')
+        logger.info('==============================')
 
     model = models.NonlinearHyperdiffusionModel(
         aspect=args.aspect, Nx=args.Nx, Nz=args.Nz, Rayleigh=args.Ra,
@@ -51,6 +57,8 @@ if __name__ == '__main__':
 
     if args.restart_file:
         model.restart(args.restart_file)
+    elif args.load_file:
+        model.load_from_existing(args.load_file, args.load_time)
     else:
         model.set_initial_conditions()
 

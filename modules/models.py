@@ -5,8 +5,13 @@ import os
 
 import dedalus.public as d3
 import numpy as np
+import xarray as xr
+import dask
+
+from modules.regridding import Regridder
 
 logger = logging.getLogger(__name__)
+# pylint: disable=no-member, too-many-arguments, too-many-instance-attributes
 
 
 class BaseModel:
@@ -29,6 +34,9 @@ class BaseModel:
         self.Rayleigh = Rayleigh
         self.Prandtl = Prandtl
         self.aspect = aspect
+        self.restarted = False
+        self.data_dir = ''
+        self.save_interval = 1
         logger.info('BaseModel parameters:')
         logger.info(f'\tRa = {Rayleigh:.2e}')
         logger.info(f'\tPr = {Prandtl:.3f}')
@@ -156,6 +164,7 @@ class BaseModel:
 
         k_base = 4
         k_perturb = 41
+
         def exp_term(x):
             base_wave = np.cos(2*np.pi*k_base*x/self.aspect)
             perturb_wave = np.cos(2*np.pi*k_perturb*(x - 0.25)/self.aspect)
@@ -166,13 +175,40 @@ class BaseModel:
         z = self.local_grids['z']
         exp = 6 - np.where(z < 0.5, exp_term(x), exp_term(x - 1))
         self.fields['theta']['g'] = -0.5*np.sign(z - 0.5)*np.abs(2*z - 1)**exp
-        self.restart = False
 
     def restart(self, file):
         """Loads a model state from a restart file."""
         logger.info(f'Initial condition: restart from {file}')
         self.solver.load_state(file)
-        self.restart = True
+        self.restarted = True
+
+    def load_from_existing(self, file, time):
+        """
+        Regrids and loads the state from an existing model run.
+
+        Args:
+            file: NetCDF data file or glob pattern.
+            time: Time of state to be loaded.
+        """
+
+        data = xr.open_mfdataset(file)
+        with dask.config.set(**{'array.slicing.split_large_chunks': True}):
+            data = data.drop_duplicates('t')
+        data = data.sel(t=time, method='nearest').compute()
+        actual_time = data.t.item()
+        logger.info(
+            f'Initial condition: state at t = {actual_time:.3f} from {file}')
+        target = {
+            'x': self.xbasis.global_grid().flatten(),
+            'z': self.zbasis.global_grid().flatten(),
+        }
+        regridder = Regridder(
+            data.theta, target, ('z', 'x'), limits={'z': (0, 1)})
+        u = regridder(data.u).transpose('x', 'z').data
+        w = regridder(data.w).transpose('x', 'z').data
+        theta = regridder(data.theta).transpose('x', 'z').data
+        self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
+        self.fields['theta'].load_from_global_grid_data(theta)
 
     def log_data(self, data_dir, save_interval):
         """
@@ -185,7 +221,7 @@ class BaseModel:
 
         self.data_dir = data_dir
         self.save_interval = save_interval
-        if self.restart:
+        if self.restarted:
             def save_schedule(iteration, **_):
                 save = (
                     (iteration % save_interval == 0)
@@ -198,7 +234,7 @@ class BaseModel:
 
         snapshots = self.solver.evaluator.add_file_handler(
             data_dir, custom_schedule=save_schedule, max_writes=1000,
-            mode=('append' if self.restart else 'overwrite'),
+            mode=('append' if self.restarted else 'overwrite'),
         )
         snapshots.add_tasks(
             [self.fields['u'], self.fields['theta']], layout='g')
