@@ -10,19 +10,20 @@ import xarray as xr
 class SpatialTransform:
     """Class for mathematical operations on Dedalus output."""
 
-    def __init__(self, Nx, Nz):
+    def __init__(self, Nx, Nz, aspect):
         """
         Instantiates a Math object.
 
         Args:
             Nx: Horizontal resolution.
             Nz: Vertical resolution.
+            aspect: Aspect ratio.
         """
 
         self.coords = d3.CartesianCoordinates('x', 'z')
         self.dist = d3.Distributor(self.coords, dtype=np.float64)
         self.xbasis = d3.RealFourier(
-            self.coords['x'], size=Nx, dealias=3/2, bounds=(0, Nx/Nz))
+            self.coords['x'], size=Nx, dealias=3/2, bounds=(0, aspect))
         self.zbasis = d3.ChebyshevT(
             self.coords['z'], size=Nz, dealias=3/2, bounds=(0, 1))
         self.x, self.z = self.dist.local_grids(self.xbasis, self.zbasis)
