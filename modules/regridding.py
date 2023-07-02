@@ -81,7 +81,10 @@ class Regridder:
             grid = grid.assign_coords({dim: self.target_coords[dim].data})
 
         for dim in self.interp_dims:
-            grid = grid.interp({dim: self.target_coords[dim]})
+            grid = grid.interp(
+                {dim: self.target_coords[dim]},
+                kwargs={'fill_value': 'extrapolate'},
+            )
 
         return grid
 
