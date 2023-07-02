@@ -17,6 +17,10 @@ class Regridder:
             target: Coarse-resolution xarray.Dataset or xarray.DataArray.
             dims: List of names of dimensions to be regridded.
             limits: Dict of grid limits (see `bounds`).
+
+        Note:
+            Choose the order of `dims` wisely as it can significantly
+            affect performance.
         """
 
         self.dims = dims
@@ -55,12 +59,11 @@ class Regridder:
 
             # Regrid along `dim`, broadcasting over other dimensions
             grid = xr.apply_ufunc(
-                lambda x: self.weights[dim] @ x,  # pylint: disable=W0640
-                grid,
+                apply_weights, grid,
+                kwargs={'weights': self.weights[dim]},
                 input_core_dims=[[dim]],
                 output_core_dims=[[dim]],
                 exclude_dims={dim},
-                vectorize=True,
             )
             # insert the coarse coordinates
             grid = grid.assign_coords({dim: self.target_coords[dim].data})
@@ -92,6 +95,9 @@ def compute_weights_1d(source, target):
     Args:
         source: Array of boundaries between points on the source grid.
         target: Array of boundaries between points on the target grid.
+
+    Returns:
+        scipy.sparse.csr_array of regridding weights.
     """
 
     # promote grids to 2d to allow broadcasting
@@ -122,6 +128,34 @@ def compute_weights_1d(source, target):
 
     # return the overlap fraction as a sparse matrix
     return sp.sparse.csr_array(overlap/target_lengths)
+
+
+def apply_weights(data, weights):
+    """
+    Regrids an array along one dimension using a weight matrix.
+
+    Args:
+        data: numpy.ndarray, with the regridding dimension as the last
+            dimension (i.e. `data.shape[-1] == weights.shape[1]`).
+        weights: Regridding weight matrix (see `compute_weights_1d`).
+
+    Returns:
+        The regridded array, which has the same shape except in the last
+        dimension, which has length `weights.shape[0]`.
+    """
+
+    # Collapse the non-regridding dimensions into one and transpose to
+    # get a 2D array whose first dimension is the regridding dimension.
+    # This way, the regridding can broadcast over an arbitrary number of
+    # non-regridding dimensions.
+    initial_shape = data.shape
+    data = data.reshape((-1, initial_shape[-1])).T
+
+    # Apply the weights (i.e. weights_ij*data_jk), then undo the
+    # reshaping and transposition to get back to the input form.
+    regridded_data = weights @ data
+    regridded_data = regridded_data.T.reshape((*initial_shape[:-1], -1))
+    return regridded_data
 
 
 def bounds(grid, limits=None):
