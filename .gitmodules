@@ -1,0 +1,3 @@
+[submodule "honours-writing"]
+	path = honours-writing
+	url = git@github.com:tschanzer/honours-writing.git
