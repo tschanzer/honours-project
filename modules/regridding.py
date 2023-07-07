@@ -23,35 +23,46 @@ class Regridder:
             affect performance.
         """
 
+        source = self._check_input(source)
+        target = self._check_input(target)
+
         self.dims = dims
-        self.source_shape = tuple(source[dim].size for dim in dims)
-        self.target_shape = tuple(target[dim].size for dim in dims)
+        source_shape = tuple(source[dim].size for dim in dims)
+        target_shape = tuple(target[dim].size for dim in dims)
+        self.source_shape = dict(zip(self.dims, source_shape))
+        self.target_shape = dict(zip(self.dims, target_shape))
         self.target_coords = target.coords
         self.weights = {}
         if limits is None:
             limits = {}
 
+        self.coarsen_dims = []
+        self.interp_dims = []
         for dim in dims:
-            # Compute the weight matrix along each dimension
-            dim_limits = limits.get(dim)
-            source_bounds = bounds(source[dim].data, limits=dim_limits)
-            target_bounds = bounds(target[dim].data, limits=dim_limits)
-            weight = compute_weights_1d(source_bounds, target_bounds)
-            self.weights[dim] = weight
+            if self.source_shape[dim] > self.target_shape[dim]:
+                self.coarsen_dims.append(dim)
+                # Compute the weight matrix along each dimension
+                dim_limits = limits.get(dim)
+                source_bounds = bounds(source[dim].data, limits=dim_limits)
+                target_bounds = bounds(target[dim].data, limits=dim_limits)
+                weight = compute_weights_1d(source_bounds, target_bounds)
+                self.weights[dim] = weight
+            else:
+                self.interp_dims.append(dim)
 
     def __call__(self, grid):
         """
         Regrids data.
 
         Args:
-            grid: Fine-resolution xarray.Dataset or xarray.DataArray.
+            grid: xarray.Dataset or xarray.DataArray.
 
         Returns:
             Regridded version of the input.
         """
 
         # Regrid the data one dimension at a time
-        for dim in self.dims:
+        for dim in self.coarsen_dims:
             # drop any non-index coordinates that depend on `dim`
             for coord in grid.coords:
                 if coord != dim and dim in grid.coords[coord].dims:
@@ -64,23 +75,36 @@ class Regridder:
                 input_core_dims=[[dim]],
                 output_core_dims=[[dim]],
                 exclude_dims={dim},
+                dask='allowed',
             )
             # insert the coarse coordinates
             grid = grid.assign_coords({dim: self.target_coords[dim].data})
+
+        for dim in self.interp_dims:
+            grid = grid.interp(
+                {dim: self.target_coords[dim]},
+                kwargs={'fill_value': 'extrapolate'},
+            )
 
         return grid
 
     def __repr__(self):
         """Returns information about the regridder."""
 
-        source_shape = dict(zip(self.dims, self.source_shape))
-        target_shape = dict(zip(self.dims, self.target_shape))
         info = (
             'Conservative Regridder\n'
-            f'  Input grid shape: {source_shape}\n'
-            f'  Output grid shape: {target_shape}'
+            f'  Input grid shape: {self.source_shape}\n'
+            f'  Output grid shape: {self.target_shape}'
         )
         return info
+
+    def _check_input(self, input_):
+        if isinstance(input_, (xr.DataArray, xr.Dataset)):
+            return input_
+        if isinstance(input_, dict):
+            return xr.DataArray(coords=input_, dims=list(input_.keys()))
+
+        raise ValueError(f'Invalid input type: {type(input_)}')
 
 
 def compute_weights_1d(source, target):
