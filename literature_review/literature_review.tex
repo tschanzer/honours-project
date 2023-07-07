@@ -121,17 +121,14 @@
 \section{Introduction}
 \subsection{Traditional parametrisation schemes}
 
-\newpage
 \section{Theory of parametrisation}
 
-\newpage
 \section{Data-driven parametrisation schemes}
 
-\newpage
 \section{Parametrisation development using toy models}
 
 \newpage
-\section{\rb{} convection and numerical methods}
+\section{\rb{} convection and numerical considerations}
 \subsection{Problem statement}
 \rb{} convection is the motion of a fluid confined between two
 horizontal isothermal plates, the temperature of the bottom plate being
@@ -272,19 +269,23 @@ and thermal diffusivity, and the \emph{Rayleigh number}
 \[
     \rayleigh \equiv \frac{g \alpha d^3 \delta T}{\kappa \nu}.
 \]
-The Rayleigh number can be interpreted as the ratio of the time scale
-for thermal transport by convection to the time scale for thermal
-transport by conduction. It determines the importance of diffusion for
-the evolution of $\vec{u}$ and $\theta$; inspection of
-\cref{eqn:momentum,eqn:energy} indicates that low $\rayleigh$ implies
-strong diffusion and high $\rayleigh$ weak diffusion. Detailed
-theoretical analysis of the governing equations (see, e.g.,
-\textcite{chandrasekhar1961} and the seminal work by
-\textcite{rayleigh1916}) reveals that there exists a critical Rayleigh
-number, below which the equations have a stable equilibrium with the
-fluid at rest and a linear conductive temperature profile. Above the
-critical value, the equilibrium is unstable and small perturbations lead
-to the formation of a regular series of rotating convection cells.
+The Rayleigh number can be interpreted as the ratio of the time scale for
+thermal transport by convection to the time scale for thermal transport by
+conduction. It determines the importance of diffusion for the evolution of
+$\vec{u}$ and $\theta$; inspection of \cref{eqn:momentum,eqn:energy} indicates
+that low $\rayleigh$ implies strong diffusion and high $\rayleigh$ weak
+diffusion. Detailed theoretical analysis of the governing equations (see, e.g.,
+\textcite{chandrasekhar1961} and the seminal work by \textcite{rayleigh1916})
+reveals that there exists a critical Rayleigh number (dependent on boundary
+conditions but of order $\SI{e3}{}$), below which the equations have a stable
+equilibrium with the fluid at rest and a linear conductive temperature profile.
+Above the critical value, the equilibrium is unstable and small perturbations
+lead to the formation of a regular series of steady, rotating convection cells.
+If the Rayleigh number is increased much further (\textcite{le_quere1991} cites
+$\rayleigh \approx \SI{2e8}{}$), the solution becomes unsteady and increasingly
+turbulent. This work is concerned with the turbulent regime, since Rayleigh
+numbers for atmospheric deep moist convection can be as large as $\SI{e22}{}$
+\parencite{chilla2012}.
 
 \subsection{Resolution dependence of numerical solutions}
 In constructing a parametrisation test-bed, I will firstly seek
@@ -409,7 +410,8 @@ resolution requirements, potentially bypassing the time-consuming and expensive
 process of iteratively running simulations, checking their convergence and
 updating the resolution.
 
-\subsubsection{Resolution tests and consequences of under-resolution}%
+\subsubsection{
+    Resolution-dependence tests and consequences of under-resolution}%
 \label{sec:res_tests}
 
 Performing numerical experiments for a 3D fluid layer,
@@ -496,6 +498,7 @@ conditions than \cref{eqn:grotzbach}.
 \newpage
 \section{Conclusion}
 
+\newpage
 \emergencystretch=5em
 \printbibliography
 \end{document}
