@@ -47,7 +47,7 @@ class Regridder:
                 target_bounds = bounds(target[dim].data, limits=dim_limits)
                 weight = compute_weights_1d(source_bounds, target_bounds)
                 self.weights[dim] = weight
-            else:
+            elif self.source_shape[dim] < self.target_shape[dim]:
                 self.interp_dims.append(dim)
 
     def __call__(self, grid):
