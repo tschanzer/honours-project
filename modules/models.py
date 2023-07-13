@@ -210,13 +210,15 @@ class BaseModel:
         self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
         self.fields['theta'].load_from_global_grid_data(theta)
 
-    def log_data(self, data_dir, save_interval):
+    def log_data(self, data_dir, save_interval, max_writes=1000):
         """
         Tells the solver to save output to a file.
 
         Args:
             data_dir: Directory for data output.
             save_interval: Number of time steps between saves.
+            max_writes: Maximum number of writes per output file
+                (default 1000).
         """
 
         self.data_dir = data_dir
@@ -233,7 +235,7 @@ class BaseModel:
                 return iteration % save_interval == 0
 
         snapshots = self.solver.evaluator.add_file_handler(
-            data_dir, custom_schedule=save_schedule, max_writes=1000,
+            data_dir, custom_schedule=save_schedule, max_writes=max_writes,
             mode=('append' if self.restarted else 'overwrite'),
         )
         snapshots.add_tasks(
@@ -241,6 +243,7 @@ class BaseModel:
         logger.info('Output settings:')
         logger.info(f'\tDirectory: {data_dir:s}')
         logger.info(f'\tLogging interval: {save_interval:d}*dt')
+        logger.info(f'\tMax writes per file: {max_writes:d}')
 
     def run(self, sim_time, timestep):
         """

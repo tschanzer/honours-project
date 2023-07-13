@@ -3,7 +3,7 @@
 import argparse
 import logging
 
-import modules.models as models
+from modules import models
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,8 @@ if __name__ == '__main__':
         '--out', type=str, help='Output directory', required=True)
     argParser.add_argument(
         '--save', type=int, help='Output interval (# steps)', required=True)
+    argParser.add_argument(
+        '--max-writes', type=int, help='Max writes per file', default=1000)
     argParser.add_argument(
         '--restart-file', help='Restart file (optional)', default=None)
     argParser.add_argument(
@@ -62,5 +64,5 @@ if __name__ == '__main__':
     else:
         model.set_initial_conditions()
 
-    model.log_data(args.out, args.save)
+    model.log_data(args.out, args.save, args.max_writes)
     model.run(args.time, args.dt)
