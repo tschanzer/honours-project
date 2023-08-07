@@ -132,7 +132,7 @@ def running_mean(data, dim):
     Calculates the running mean along a dimension.
 
     Args:
-        data: xarray.Dataset or xarray.Dataset.
+        data: xarray.DataArray or xarray.Dataset.
         dim: Dimension name.
 
     Returns:
@@ -151,7 +151,7 @@ def reverse_running_mean(data, dim):
     Calculates the running mean along a dimension, starting from the end.
 
     Args:
-        data: xarray.Dataset or xarray.Dataset.
+        data: xarray.DataArray or xarray.Dataset.
         dim: Dimension name.
 
     Returns:
@@ -163,3 +163,39 @@ def reverse_running_mean(data, dim):
         input_core_dims=[[dim]],
         output_core_dims=[[dim]],
     )
+
+
+def autocorrelation(array, dim, max_lag, lag_step):
+    """
+    Calculate the autocorrelation of an array along a dimension.
+
+    Args:
+        data: xarray.DataArray.
+        dim: Dimension along which the autocorrelation is to be computed
+        max_lag: Maximum lag for the autocorrelation.
+        lag_step: Lag step size for the autocorrelation.
+
+    Returns:
+        xarray.DataArray.
+    """
+
+    step = array[dim].diff(dim)
+    if not np.allclose(step, step[0]):
+        raise ValueError('Coordinate must have regular steps.')
+
+    # Number of grid points corresponding to one lag step
+    n_lag_step = int(round(lag_step/step[0].item()))
+    # Round lag step to the nearest multiple of grid spacing
+    lag_step = n_lag_step*step[0]
+    # Number of lag steps needed to reach max_lag
+    n_max_lag = int(max_lag//lag_step)
+
+    result = []
+    for n in range(n_max_lag + 1):
+        array1 = array.isel({dim: slice(n*n_lag_step, None)})
+        array2 = array.isel({dim: slice(0, array[dim].size - n*n_lag_step)})
+        result.append(xr.corr(array1.drop(dim), array2.drop(dim), dim))
+    result = xr.concat(result, f'{dim}_lag')
+    result = result.assign_coords(
+        {f'{dim}_lag': np.linspace(0, n_max_lag*lag_step, n_max_lag + 1)})
+    return result
