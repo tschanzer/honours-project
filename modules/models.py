@@ -18,7 +18,7 @@ class BaseModel:
     """Base model for Rayleigh-Benard convection."""
     timestepper = d3.RK222
 
-    def __init__(self, aspect, Nx, Nz, Rayleigh, Prandtl):
+    def __init__(self, aspect, Nx, Nz, Rayleigh, Prandtl, hyper):
         """
         Builds the solver. This is the same for all simulations.
 
@@ -33,13 +33,16 @@ class BaseModel:
         # Parameters
         self.Rayleigh = Rayleigh
         self.Prandtl = Prandtl
+        self.hyper = hyper
         self.aspect = aspect
         self.restarted = False
         self.data_dir = ''
         self.save_interval = 1
-        logger.info('BaseModel parameters:')
+        self.max_writes = 1000
+        logger.info('Parameters:')
         logger.info(f'\tRa = {Rayleigh:.2e}')
         logger.info(f'\tPr = {Prandtl:.3f}')
+        logger.info(f'\thyper = {hyper:.2e}')
         logger.info(f'\taspect = {aspect:.1f}')
         logger.info(f'\tNx = {Nx:d}')
         logger.info(f'\tNz = {Nz:d}')
@@ -108,29 +111,47 @@ class BaseModel:
         self.solver = self.problem.build_solver(self.timestepper)
 
     @property
+    def taper(self):
+        """Field that tapers to zero at z = 0 and z = 1."""
+        def taper_func(x):
+            return 56*x**10 - 140*x**12 + 120*x**14 - 35*x**16
+
+        field = self.dist.Field(bases=self.zbasis)
+        field['g'] = 1 - taper_func(2*self.local_grids['z'] - 1)
+        return field
+
+    @property
     def momentum_equation(self):
         """Momentum equation."""
         nu = np.sqrt(self.Prandtl/self.Rayleigh)
+        lap_u = d3.div(self.substitutions['grad_u'])
         lhs = (
             d3.dt(self.fields['u'])
-            - nu*d3.div(self.substitutions['grad_u'])
+            - nu*lap_u
             + d3.grad(self.fields['pi'])
             - self.fields['theta']*self.unit_vectors['z_hat']
             + self.substitutions['lift'](self.fields['tau_u2'])
         )
-        rhs = -self.fields['u']@self.substitutions['grad_u']
+        rhs = (
+            -self.fields['u']@self.substitutions['grad_u']
+            + nu*self.hyper*self.taper*(lap_u@lap_u)**(1/2)*lap_u
+        )
         return lhs, rhs
 
     @property
     def energy_equation(self):
         """Energy equation."""
         kappa = 1/np.sqrt(self.Rayleigh*self.Prandtl)
+        lap_theta = d3.div(self.substitutions['grad_theta'])
         lhs = (
             d3.dt(self.fields['theta'])
-            - kappa*d3.div(self.substitutions['grad_theta'])
+            - kappa*lap_theta
             + self.substitutions['lift'](self.fields['tau_theta2'])
         )
-        rhs = -self.fields['u']@self.substitutions['grad_theta']
+        rhs = (
+            -self.fields['u']@self.substitutions['grad_theta']
+            + kappa*self.hyper*self.taper*abs(lap_theta)*lap_theta
+        )
         return lhs, rhs
 
     @property
@@ -157,6 +178,10 @@ class BaseModel:
             (self.fields['theta'](z=1), -1/2),
         )
         return conditions
+
+
+class DNSModel(BaseModel):
+    """Model for direct numerical simulations."""
 
     def set_initial_conditions(self):
         """Initialises the variables for a new run."""
@@ -223,19 +248,10 @@ class BaseModel:
 
         self.data_dir = data_dir
         self.save_interval = save_interval
-        if self.restarted:
-            def save_schedule(iteration, **_):
-                save = (
-                    (iteration % save_interval == 0)
-                    and (iteration != self.solver.initial_iteration)
-                )
-                return save
-        else:
-            def save_schedule(iteration, **_):
-                return iteration % save_interval == 0
+        self.max_writes = max_writes
 
         snapshots = self.solver.evaluator.add_file_handler(
-            data_dir, custom_schedule=save_schedule, max_writes=max_writes,
+            data_dir, iter=save_interval, max_writes=max_writes,
             mode=('append' if self.restarted else 'overwrite'),
         )
         snapshots.add_tasks(
@@ -244,6 +260,26 @@ class BaseModel:
         logger.info(f'\tDirectory: {data_dir:s}')
         logger.info(f'\tLogging interval: {save_interval:d}*dt')
         logger.info(f'\tMax writes per file: {max_writes:d}')
+
+    def log_data_plusdt(self, data_dir):
+        """
+        Saves a second dataset with snapshots lagged by one time step.
+
+        Args:
+            data_dir: Directory for data output.
+        """
+
+        snapshots = self.solver.evaluator.add_file_handler(
+            data_dir,
+            custom_schedule=(
+                lambda **kw: kw['iteration'] % self.save_interval == 1
+            ),
+            max_writes=self.max_writes,
+            mode=('append' if self.restarted else 'overwrite'),
+        )
+        snapshots.add_tasks(
+            [self.fields['u'], self.fields['theta']], layout='g')
+        logger.info(f'\tSaving t+dt snapshots at: {data_dir:s}')
 
     def run(self, sim_time, timestep):
         """
@@ -296,125 +332,101 @@ class BaseModel:
         restarts.add_tasks(self.solver.state, layout='g')
 
 
-class LinearHyperdiffusionModel(BaseModel):
-    """Model with linear hyperdiffusion."""
-    def __init__(self, *args, hyper_coef, **kwargs):
+class SingleStepModel(BaseModel):
+    """Model for coarse-graining and timestepping existing data."""
+
+    def input_highres(self, file):
         """
-        Builds the solver.
+        Prepares high-resolution input data for timestepping.
 
         Args:
-            aspect: Domain aspect ratio.
-            Nx: Number of horizontal modes.
-            Nz: Number of vertical modes.
-            Rayleigh: Rayleigh number.
-            Prandtl: Prandtl number.
-            hyper_coef: Dimensionless hyperviscosity coefficient.
+            file: NetCDF data file or glob pattern.
         """
+        logger.info(f'Using high-res data from {file}')
+        with dask.config.set(**{'array.slicing.split_large_chunks': True}):
+            # pylint: disable=W0201
+            self.highres = xr.open_mfdataset(file)
+            target = {
+                'x': self.xbasis.global_grid().flatten(),
+                'z': self.zbasis.global_grid().flatten(),
+            }
+            # pylint: disable=W0201
+            self.regridder = Regridder(
+                self.highres.theta, target, ('z', 'x'), limits={'z': (0, 1)})
 
-        logger.info('LinearHyperdiffusionModel parameters:')
-        logger.info(f'\thyper_coef = {hyper_coef:.2e}')
-        self.hyper_coef = hyper_coef
-        super().__init__(*args, **kwargs)
-
-    @property
-    def taper(self):
-        """Field that tapers to zero at z = 0 and z = 1."""
-        field = self.dist.Field(bases=self.zbasis)
-        field['g'] = 1 - (2*self.local_grids['z'] - 1)**10
-        return field
-
-    @property
-    def momentum_equation(self):
-        """Momentum equation."""
-        lhs = (
-            self.Rayleigh/self.Prandtl*d3.dt(self.fields['u'])
-            - d3.div(self.substitutions['grad_u'])
-            + self.hyper_coef*self.taper*d3.lap(d3.lap(self.fields['u']))
-            + d3.grad(self.fields['pi'])
-            - self.fields['theta']*self.unit_vectors['z_hat']
-            + self.substitutions['lift'](self.fields['tau_u2'])
-        )
-        rhs = (
-            -self.Rayleigh/self.Prandtl
-            * self.fields['u']@self.substitutions['grad_u']
-        )
-        return lhs, rhs
-
-    @property
-    def energy_equation(self):
-        """Energy equation."""
-        lhs = (
-            self.Rayleigh*d3.dt(self.fields['theta'])
-            - d3.div(self.substitutions['grad_theta'])
-            + self.hyper_coef*self.taper*d3.lap(d3.lap(self.fields['theta']))
-            + self.substitutions['lift'](self.fields['tau_theta2'])
-        )
-        rhs = (
-            -self.Rayleigh*self.fields['u']@self.substitutions['grad_theta']
-        )
-        return lhs, rhs
-
-
-class NonlinearHyperdiffusionModel(BaseModel):
-    """Model with nonlinear hyperdiffusion."""
-    def __init__(self, *args, hyper, **kwargs):
+    def log_data_t(self, data_dir, max_writes=1000):
         """
-        Builds the solver.
+        Tells the solver to save the coarse-grained data before timestepping.
 
         Args:
-            aspect: Domain aspect ratio.
-            Nx: Number of horizontal modes.
-            Nz: Number of vertical modes.
-            Rayleigh: Rayleigh number.
-            Prandtl: Prandtl number.
-            hyper: Dimensionless hyperdiffusivity.
+            data_dir: Directory for data output.
+            max_writes: Maximum number of writes per output file
+                (default 1000).
         """
 
-        logger.info('NonlinearHyperdiffusionModel parameters:')
-        logger.info(f'\thyper = {hyper:.2e}')
-        self.hyper = hyper
-        super().__init__(*args, **kwargs)
+        self.max_writes = max_writes
+        snapshots = self.solver.evaluator.add_file_handler(
+            data_dir, iter=1, max_writes=max_writes)
+        snapshots.add_tasks(
+            [self.fields['u'], self.fields['theta']], layout='g')
+        logger.info(f'\tSaving time t snapshots at: {data_dir:s}')
 
-    @property
-    def taper(self):
-        """Field that tapers to zero at z = 0 and z = 1."""
-        def taper_func(x):
-            return 56*x**10 - 140*x**12 + 120*x**14 - 35*x**16
+    def log_data_tplusdt(self, data_dir):
+        """
+        Tells the solver to save the coarse-grained data after timestepping.
 
-        field = self.dist.Field(bases=self.zbasis)
-        field['g'] = 1 - taper_func(2*self.local_grids['z'] - 1)
-        return field
+        Args:
+            data_dir: Directory for data output.
+        """
 
-    @property
-    def momentum_equation(self):
-        """Momentum equation."""
-        nu = np.sqrt(self.Prandtl/self.Rayleigh)
-        lap_u = d3.div(self.substitutions['grad_u'])
-        lhs = (
-            d3.dt(self.fields['u'])
-            - nu*lap_u
-            + d3.grad(self.fields['pi'])
-            - self.fields['theta']*self.unit_vectors['z_hat']
-            + self.substitutions['lift'](self.fields['tau_u2'])
-        )
-        rhs = (
-            -self.fields['u']@self.substitutions['grad_u']
-            + nu*self.hyper*self.taper*(lap_u@lap_u)**(1/2)*lap_u
-        )
-        return lhs, rhs
+        # Omit iter argument to add_file_handler to disable auto evaluation
+        # pylint: disable=W0201
+        self.snapshots_tplusdt = self.solver.evaluator.add_file_handler(
+            data_dir, max_writes=self.max_writes)
+        self.snapshots_tplusdt.add_tasks(
+            [self.fields['u'], self.fields['theta']], layout='g')
+        logger.info(f'\tSaving time t+dt snapshots at: {data_dir:s}')
 
-    @property
-    def energy_equation(self):
-        """Energy equation."""
-        kappa = 1/np.sqrt(self.Rayleigh*self.Prandtl)
-        lap_theta = d3.div(self.substitutions['grad_theta'])
-        lhs = (
-            d3.dt(self.fields['theta'])
-            - kappa*lap_theta
-            + self.substitutions['lift'](self.fields['tau_theta2'])
-        )
-        rhs = (
-            -self.fields['u']@self.substitutions['grad_theta']
-            + kappa*self.hyper*self.taper*abs(lap_theta)*lap_theta
-        )
-        return lhs, rhs
+    def run(self, timestep):
+        """
+        Runs the simulation.
+
+        Args:
+            sim_time: Total simulation time.
+            timestep: Time step.
+        """
+
+        try:
+            logger.info(f'Starting main loop with dt = {timestep:.3g}')
+            for i in range(self.highres.t.size):
+                # Load an initial state from the coarse-grained dataset
+                u = self.regridder(
+                    self.highres.u.isel(t=i)).transpose('x', 'z').data
+                w = self.regridder(
+                    self.highres.w.isel(t=i)).transpose('x', 'z').data
+                theta = self.regridder(
+                    self.highres.theta.isel(t=i)).transpose('x', 'z').data
+                self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
+                self.fields['theta'].load_from_global_grid_data(theta)
+
+                # Set the sim time so it shows up correctly in the output
+                self.solver.sim_time = self.highres.t[i].item()
+
+                # Perform one timestep (this automatically saves the initial
+                # state)
+                self.solver.step(timestep)
+
+                # Save the model state after the timestep
+                self.solver.evaluator.evaluate_handlers(
+                    [self.snapshots_tplusdt], iteration=self.solver.iteration,
+                    wall_time=self.solver.wall_time,
+                    sim_time=self.solver.sim_time, timestep=self.solver.dt,
+                )
+
+                if i % 100 == 0:
+                    logger.info(f'Step {i+1:d} of {self.highres.t.size}')
+        except Exception:
+            logger.error('Exception raised, triggering end of main loop.')
+            raise
+        finally:
+            self.solver.log_stats()
