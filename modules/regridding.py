@@ -8,15 +8,17 @@ import xarray as xr
 class Regridder:
     """Regridding object for N-D rectilinear grids."""
 
-    def __init__(self, source, target, dims, limits=None):
+    def __init__(self, source, target, limits=None, periods=None):
         """
         Creates the regridding object.
 
         Args:
             source: Fine-resolution xarray.Dataset or xarray.DataArray.
             target: Coarse-resolution xarray.Dataset or xarray.DataArray.
-            dims: List of names of dimensions to be regridded.
-            limits: Dict of grid limits (see `bounds`).
+            limits: Dictionary mapping the name of each non-periodic
+                regridding dimension to a 2-tuple of limits.
+            periods: Dictionary mapping the name of each periodic regridding
+                dimension to its period.
 
         Note:
             Choose the order of `dims` wisely as it can significantly
@@ -26,11 +28,9 @@ class Regridder:
         source = self._check_input(source)
         target = self._check_input(target)
 
-        self.dims = dims
-        source_shape = tuple(source[dim].size for dim in dims)
-        target_shape = tuple(target[dim].size for dim in dims)
-        self.source_shape = dict(zip(self.dims, source_shape))
-        self.target_shape = dict(zip(self.dims, target_shape))
+        self.dims = [*limits.keys(), *periods.keys()]
+        self.source_shape = {dim: source[dim].size for dim in self.dims}
+        self.target_shape = {dim: target[dim].size for dim in self.dims}
         self.target_coords = target.coords
         self.weights = {}
         if limits is None:
@@ -38,16 +38,25 @@ class Regridder:
 
         self.coarsen_dims = []
         self.interp_dims = []
-        for dim in dims:
-            if self.source_shape[dim] > self.target_shape[dim]:
+        for dim in limits.keys():
+            if source[dim].size > target[dim].size:
                 self.coarsen_dims.append(dim)
-                # Compute the weight matrix along each dimension
-                dim_limits = limits.get(dim)
-                source_bounds = bounds(source[dim].data, limits=dim_limits)
-                target_bounds = bounds(target[dim].data, limits=dim_limits)
-                weight = compute_weights_1d(source_bounds, target_bounds)
-                self.weights[dim] = weight
-            elif self.source_shape[dim] < self.target_shape[dim]:
+                source_bounds = bounds_linear(source[dim].data, limits[dim])
+                target_bounds = bounds_linear(target[dim].data, limits[dim])
+                weight = compute_weights_linear(source_bounds, target_bounds)
+                self.weights[dim] = sp.sparse.csr_array(weight)
+            elif source[dim].size < target[dim].size:
+                self.interp_dims.append(dim)
+
+        for dim in periods.keys():
+            if source[dim].size > target[dim].size:
+                self.coarsen_dims.append(dim)
+                source_bounds = bounds_periodic(source[dim].data, periods[dim])
+                target_bounds = bounds_periodic(target[dim].data, periods[dim])
+                weight = compute_weights_periodic(
+                    source_bounds, target_bounds, periods[dim])
+                self.weights[dim] = sp.sparse.csr_array(weight)
+            elif source[dim].size < target[dim].size:
                 self.interp_dims.append(dim)
 
     def __call__(self, grid):
@@ -107,9 +116,9 @@ class Regridder:
         raise ValueError(f'Invalid input type: {type(input_)}')
 
 
-def compute_weights_1d(source, target):
+def compute_weights_linear(source, target):
     """
-    Regridding weight matrix for 1d grids.
+    Regridding weight matrix for 1d grids with non-periodic boundaries.
 
     weight_ij = (
         (overlapping length between target interval i and source interval j)
@@ -121,14 +130,14 @@ def compute_weights_1d(source, target):
         target: Array of boundaries between points on the target grid.
 
     Returns:
-        scipy.sparse.csr_array of regridding weights.
+        Array of regridding weights.
     """
 
     # promote grids to 2d to allow broadcasting
     source = np.atleast_2d(source)  # source has index j
     target = np.atleast_2d(target).T  # target has index i
 
-    # define shifted arrays for code readability
+    # define shifted arrays for readability
     source_j = source[:, :-1]
     target_i = target[:-1, :]
     source_jplus1 = source[:, 1:]
@@ -142,16 +151,58 @@ def compute_weights_1d(source, target):
     overlap = np.maximum(overlap, 0)  # ensure it is non-negative
 
     # find the length of each target interval
-    target_lengths = (
-        np.minimum(target_iplus1, source[0, -1])
-        - np.maximum(target_i, source[0, 0])
-    )
-    # if the target interval does not overlap with the source grid,
-    # set its length to NaN
-    target_lengths[target_lengths <= 0] = np.nan
+    target_lengths = target_iplus1 - target_i
 
-    # return the overlap fraction as a sparse matrix
-    return sp.sparse.csr_array(overlap/target_lengths)
+    # return the overlap fraction
+    return overlap/target_lengths
+
+
+def compute_weights_periodic(source, target, period):
+    """
+    Regridding weight matrix for 1d grids with periodic boundaries.
+
+    weight_ij = (
+        (overlapping length between target interval i and source interval j)
+        / (length of target interval i)
+    )
+
+    Args:
+        source: Array of boundaries between points on the source grid.
+        target: Array of boundaries between points on the target grid.
+        period: Period of the grid.
+
+    Returns:
+        Array of regridding weights.
+    """
+
+    if source[-1] > target[-1]:
+        # If the rightmost source cell extends past the right edge of the
+        # rightmost target cell, make a copy of the leftmost target cell
+        # and put it at the right end of the target trid
+        target = np.concatenate([target, [target[1] + period]])
+        # Compute the weight matrix as usual
+        weights_temp = compute_weights_linear(source, target)
+        # Then remove the last row of the matrix (which corresponds to the
+        # imaginary target cell) and add it to the first row
+        weights = weights_temp[:-1, :]
+        weights[0, :] += weights_temp[-1, :]
+    elif source[0] < target[0]:
+        # If the leftmost source cell extends past the left edge of the
+        # leftmost target cell, make a copy of the rightmost target cell
+        # and put it at the left end of the target trid
+        target = np.concatenate([[target[-2] - period], target])
+        # Compute the weight matrix as usual
+        weights_temp = compute_weights_linear(source, target)
+        # Then remove the first row of the matrix (which corresponds to the
+        # imaginary target cell) and add it to the last row
+        weights = weights_temp[1:, :]
+        weights[-1, :] += weights_temp[0, :]
+    else:
+        # If the ends of the source and target grids match exactly, the
+        # usual method works
+        weights = compute_weights_linear(source, target)
+
+    return weights
 
 
 def apply_weights(data, weights):
@@ -182,9 +233,9 @@ def apply_weights(data, weights):
     return regridded_data
 
 
-def bounds(grid, limits=None):
+def bounds_linear(grid, limits):
     """
-    Estimates boundaries between 1D grid points.
+    Estimates cell boundaries for non-periodic 1D grids.
 
     Args:
         grid: 1D array of grid points.
@@ -195,10 +246,22 @@ def bounds(grid, limits=None):
         Boundaries are assumed to be the midpoints between grid points.
     """
 
-    if limits is None:
-        # choose first and last boundaries so the first and last grid
-        # points are at the centres of their respective intervals
-        limits = [2*grid[0] - grid[1], 2*grid[-1] - grid[-2]]
-
     midpoints = (grid[:-1] + grid[1:])/2
     return np.concatenate([[limits[0]], midpoints, [limits[1]]])
+
+
+def bounds_periodic(grid, period):
+    """
+    Estimates cell boundaries for periodic 1D grids.
+
+    Args:
+        grid: 1D array of grid points.
+        period: Period of the grid.
+
+    Returns:
+        Array of estimated boundaries, with length len(grid) + 1.
+        Boundaries are assumed to be the midpoints between grid points.
+    """
+
+    grid = np.concatenate([[grid[-1] - period], grid, [grid[0] + period]])
+    return (grid[:-1] + grid[1:])/2

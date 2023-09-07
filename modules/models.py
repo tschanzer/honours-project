@@ -228,7 +228,9 @@ class DNSModel(BaseModel):
             'z': self.zbasis.global_grid().flatten(),
         }
         regridder = Regridder(
-            data.theta, target, ('z', 'x'), limits={'z': (0, 1)})
+            data.theta, target, limits={'z': (0, 1)},
+            periods={'x': self.aspect},
+        )
         u = regridder(data.u).transpose('x', 'z').data
         w = regridder(data.w).transpose('x', 'z').data
         theta = regridder(data.theta).transpose('x', 'z').data
@@ -352,7 +354,9 @@ class SingleStepModel(BaseModel):
             }
             # pylint: disable=W0201
             self.regridder = Regridder(
-                self.highres.theta, target, ('z', 'x'), limits={'z': (0, 1)})
+                self.highres.theta, target, limits={'z': (0, 1)},
+                periods={'x': self.aspect},
+            )
 
     def log_data_t(self, data_dir, max_writes=1000):
         """
