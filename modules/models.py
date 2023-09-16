@@ -18,7 +18,7 @@ class BaseModel:
     """Base model for Rayleigh-Benard convection."""
     timestepper = d3.RK222
 
-    def __init__(self, aspect, Nx, Nz, Rayleigh, Prandtl, hyper):
+    def __init__(self, aspect, Nx, Nz, Rayleigh, Prandtl, hyper=0):
         """
         Builds the solver. This is the same for all simulations.
 
@@ -332,6 +332,71 @@ class DNSModel(BaseModel):
             custom_schedule=restart_schedule, mode='append',
         )
         restarts.add_tasks(self.solver.state, layout='g')
+
+
+class LESModel(DNSModel):
+    """Large eddy simulation model using the Smagorinsky closure."""
+
+    @property
+    def strain_tensor(self):
+        """Strain tensor."""
+        return 0.5*(
+            self.substitutions['grad_u']
+            + d3.transpose(self.substitutions['grad_u'])
+        )
+
+    @property
+    def eddy_viscosity(self):
+        """Smagorinsky eddy viscosity."""
+        filter_width = 4
+        delta_x = filter_width*self.xbasis.local_grid_spacing(axis=0)
+        delta_z = filter_width*self.zbasis.local_grid_spacing(axis=1)
+        delta = self.dist.Field(bases=(self.xbasis, self.zbasis))
+        delta['g'] = np.sqrt(delta_x*delta_z)
+
+        smagorinsky_coeff = 0.17
+        return (
+            self.taper*(smagorinsky_coeff*delta)**2
+            * (2*d3.trace(self.strain_tensor@self.strain_tensor))**0.5
+        )
+
+    @property
+    def momentum_equation(self):
+        """Momentum equation."""
+        nu = np.sqrt(self.Prandtl/self.Rayleigh)
+        lap_u = d3.div(self.substitutions['grad_u'])
+        subgrid_stress = 2*self.eddy_viscosity*self.strain_tensor
+
+        lhs = (
+            d3.dt(self.fields['u'])
+            - nu*lap_u
+            + d3.grad(self.fields['pi'])
+            - self.fields['theta']*self.unit_vectors['z_hat']
+            + self.substitutions['lift'](self.fields['tau_u2'])
+        )
+        rhs = (
+            -self.fields['u']@self.substitutions['grad_u']
+            + d3.div(subgrid_stress)
+        )
+        return lhs, rhs
+
+    @property
+    def energy_equation(self):
+        """Energy equation."""
+        kappa = 1/np.sqrt(self.Rayleigh*self.Prandtl)
+        lap_theta = d3.div(self.substitutions['grad_theta'])
+        subgrid_flux = self.eddy_viscosity*self.substitutions['grad_theta']
+
+        lhs = (
+            d3.dt(self.fields['theta'])
+            - kappa*lap_theta
+            + self.substitutions['lift'](self.fields['tau_theta2'])
+        )
+        rhs = (
+            -self.fields['u']@self.substitutions['grad_theta']
+            + d3.div(subgrid_flux)
+        )
+        return lhs, rhs
 
 
 class SingleStepModel(BaseModel):
