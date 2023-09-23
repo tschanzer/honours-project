@@ -334,8 +334,8 @@ class DNSModel(BaseModel):
         restarts.add_tasks(self.solver.state, layout='g')
 
 
-class LESModel(DNSModel):
-    """Large eddy simulation model using the Smagorinsky closure."""
+class LESMixin:
+    """LES equations."""
 
     @property
     def strain_tensor(self):
@@ -397,6 +397,12 @@ class LESModel(DNSModel):
             + d3.div(subgrid_flux)
         )
         return lhs, rhs
+
+
+class LESModel(LESMixin, DNSModel):
+    """Large eddy simulation base model using the Smagorinsky closure."""
+
+    pass
 
 
 class SingleStepModel(BaseModel):
@@ -468,6 +474,10 @@ class SingleStepModel(BaseModel):
         try:
             logger.info(f'Starting main loop with dt = {timestep:.3g}')
             for i in range(self.highres.t.size):
+                # Zero all fields just to be safe
+                for field in self.fields:
+                    self.fields[field]['g'] = 0
+
                 # Load an initial state from the coarse-grained dataset
                 u = self.regridder(
                     self.highres.u.isel(t=i)).transpose('x', 'z').data
@@ -499,3 +509,9 @@ class SingleStepModel(BaseModel):
             raise
         finally:
             self.solver.log_stats()
+
+
+class LESSingleStepModel(LESMixin, SingleStepModel):
+    """LES model for coarse-graining and timestepping existing data."""
+
+    pass
