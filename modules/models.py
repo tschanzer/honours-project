@@ -410,30 +410,6 @@ class LESModel(LESMixin, DNSModel):
 class SingleStepModel(BaseModel):
     """Model for coarse-graining and timestepping existing data."""
 
-    # @property
-    # def boundary_conditions(self):
-    #     """
-    #     Modified boundary conditions.
-
-    #     Bae and Lozano-Durán (2017) explain that because the filtering
-    #     operation violates the w(z=0,1) = 0 boundary condition, we have
-    #     to relax the boundary condition when running the explicitly
-    #     filtered model.
-    #     """
-
-    #     self.fields['u_bottom'] = self.dist.VectorField(
-    #             self.coords, name='u_bottom', bases=self.xbasis)
-    #     self.fields['u_top'] = self.dist.VectorField(
-    #             self.coords, name='u_top', bases=self.xbasis)
-
-    #     conditions = (
-    #         (self.fields['u'](z=0), self.fields['u_bottom']),
-    #         (self.fields['u'](z=1), self.fields['u_top']),
-    #         (self.fields['theta'](z=0), 1/2),
-    #         (self.fields['theta'](z=1), -1/2),
-    #     )
-    #     return conditions
-
     def input_highres(self, file):
         """
         Prepares high-resolution input data for timestepping.
@@ -444,11 +420,11 @@ class SingleStepModel(BaseModel):
         logger.info(f'Using high-res data from {file}')
         # pylint: disable=W0201
         self.highres = xr.open_mfdataset(file)
+
+    def init_filter(self):
         # pylint: disable=W0201
-        self.filter = spatial.Filter(
-            (self.highres.x.size, self.highres.z.size),
-            (self.Nx, self.Nz),
-            self.aspect,
+        self.filter = DiffusionModel(
+            self.aspect, self.highres.x.size, self.highres.z.size,
         )
 
     def log_data_t(self, data_dir, max_writes=1000):
@@ -484,14 +460,15 @@ class SingleStepModel(BaseModel):
             [self.fields['u'], self.fields['theta']], layout='g')
         logger.info(f'\tSaving time t+dt snapshots at: {data_dir:s}')
 
-    def run(self, timestep, filter_std):
+    def run(self, timestep, filter_time, filter_dt):
         """
         Runs the simulation.
 
         Args:
             sim_time: Total simulation time.
             timestep: Time step.
-            filter_std: Filter standard deviation.
+            filter_time: Run time of diffusion model for smoothing.
+            filter_dt: Time step of diffusion model.
         """
 
         try:
@@ -501,31 +478,19 @@ class SingleStepModel(BaseModel):
                 for field in self.fields:
                     self.fields[field]['g'] = 0
 
-                # Load an initial state from the coarse-grained dataset
-                u = self.filter(
-                    self.highres.u.isel(t=i).compute(), filter_std, 'u'
-                ).transpose('x', 'z').data
-                w = self.filter(
-                    self.highres.w.isel(t=i).compute(), filter_std, 'u'
-                ).transpose('x', 'z').data
-                theta = self.filter(
-                    self.highres.theta.isel(t=i).compute(), filter_std, 'theta'
-                ).transpose('x', 'z').data
+                # Smooth the high-res state by running it throgh the
+                # diffusion model
+                u, w, theta = self.filter.run(
+                    self.highres.u.isel(t=i).compute(),
+                    self.highres.w.isel(t=i).compute(),
+                    self.highres.theta.isel(t=i).compute(),
+                    time=filter_time,
+                    dt=filter_dt,
+                    to_shape=(self.Nx, self.Nz),
+                )
+                # Load the smoothed state into the solver
                 self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
                 self.fields['theta'].load_from_global_grid_data(theta)
-
-                # # find out u, w at z=0,1
-                # self.fields['u'].change_scales(1)
-                # u_bottom = self.fields['u']['g'][:,:,0:1]
-                # u_top = self.fields['u']['g'][:,:,-1:]
-
-                # # ensure u(z=0,1) = 0
-                # u_bottom[0,:,:] = 0
-                # u_top[0,:,:] = 0
-
-                # # update the boundary conditon for w(z=0,1)
-                # self.fields['u_bottom']['g'] = u_bottom
-                # self.fields['u_top']['g'] = u_top
 
                 # Set the sim time so it shows up correctly in the output
                 self.solver.sim_time = self.highres.t[i].item()
@@ -554,3 +519,127 @@ class LESSingleStepModel(LESMixin, SingleStepModel):
     """LES model for coarse-graining and timestepping existing data."""
 
     pass
+
+
+class DiffusionModel:
+    """Diffusion model for smoothing data."""
+    timestepper = d3.RK222
+
+    def __init__(self, aspect, Nx, Nz):
+        """
+        Builds the solver.
+
+        Args:
+            aspect: Domain aspect ratio.
+            Nx: Number of horizontal modes.
+            Nz: Number of vertical modes.
+        """
+
+        self.Nx = Nx
+        self.Nz = Nz
+
+        # Fundamental objects
+        coords = d3.CartesianCoordinates('x', 'z')
+        dist = d3.Distributor(coords, dtype=np.float64)
+        xbasis = d3.RealFourier(
+            coords['x'], size=Nx, bounds=(0, aspect), dealias=3/2)
+        zbasis = d3.ChebyshevT(
+            coords['z'], size=Nz, bounds=(0, 1), dealias=3/2)
+        _, z_hat = coords.unit_vector_fields(dist)
+
+        # Fields
+        self.fields = {
+            'u': dist.VectorField(
+                coords, name='u', bases=(xbasis, zbasis)),
+            'theta': dist.Field(
+                name='theta', bases=(xbasis, zbasis)),
+            'pi': dist.Field(
+                name='pi', bases=(xbasis, zbasis)),
+            'tau_pi': dist.Field(
+                name='tau_pi'),
+            'tau_theta1': dist.Field(
+                name='tau_theta1', bases=xbasis),
+            'tau_theta2': dist.Field(
+                name='tau_theta2', bases=xbasis),
+            'tau_u1': dist.VectorField(
+                coords, name='tau_u1', bases=xbasis),
+            'tau_u2': dist.VectorField(
+                coords, name='tau_u2', bases=xbasis),
+        }
+
+        # Substitutions
+        def lift(field):
+            """Multiplies by the highest Chebyshev polynomial."""
+            return d3.Lift(field, zbasis.derivative_basis(1), -1)
+
+        grad_u = d3.grad(self.fields['u']) - z_hat*lift(self.fields['tau_u1'])
+        grad_theta = (
+            d3.grad(self.fields['theta'])
+            - z_hat*lift(self.fields['tau_theta1'])
+        )
+
+        # Problem
+        problem = d3.IVP(list(self.fields.values()))
+        problem.add_equation((
+            (
+                d3.dt(self.fields['u'])
+                - d3.div(grad_u)
+                + d3.grad(self.fields['pi'])
+                + lift(self.fields['tau_u2'])
+            ),
+            0,
+        ))
+        problem.add_equation((
+            (
+                d3.dt(self.fields['theta'])
+                - d3.div(grad_theta)
+                + lift(self.fields['tau_theta2'])
+            ),
+            0,
+        ))
+        problem.add_equation((d3.trace(grad_u) + self.fields['tau_pi'], 0))
+        problem.add_equation((d3.integ(self.fields['pi']), 0))
+        problem.add_equation((self.fields['u'](z=0), 0))
+        problem.add_equation((self.fields['u'](z=1), 0))
+        problem.add_equation((self.fields['theta'](z=0), 1/2))
+        problem.add_equation((self.fields['theta'](z=1), -1/2))
+
+        # Solver
+        self.solver = problem.build_solver(self.timestepper)
+
+    def run(self, u, w, theta, time, dt, to_shape=None):
+        """
+        Smooths a state by running the solver.
+
+        Args:
+            u, w, theta: np.ndarray.
+            time: Run time (i.e. amount of smoothing)
+            to_shape: Output resolution.
+
+        Returns:
+            Smoothed u, w and theta.
+        """
+
+        # Zero all fields just to be safe
+        for field in self.fields:
+            self.fields[field]['g'] = 0
+
+        # Load initial condition
+        self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
+        self.fields['theta'].load_from_global_grid_data(theta)
+
+        # Run until stop time is reached
+        run_time = 0
+        while run_time < time:
+            self.solver.step(dt)
+            run_time += dt
+
+        # Return final state
+        if to_shape is None:
+            to_shape = (self.Nx, self.Nz)
+        new_scales = (to_shape[0]/self.Nx, to_shape[1]/self.Nz)
+        self.fields['u'].change_scales(new_scales)
+        self.fields['theta'].change_scales(new_scales)
+        u_data = self.fields['u'].allgather_data('g')
+        theta_data = self.fields['theta'].allgather_data('g')
+        return u_data[0,:,:], u_data[1,:,:], theta_data

@@ -25,8 +25,11 @@ if __name__ == '__main__':
     argParser.add_argument(
         '--hyper', type=float, help='Hyperdiffusivity', required=True)
     argParser.add_argument(
-        '--filter-std', type=float,
-        help='Filter standard deviation', required=True)
+        '--filter-time', type=float,
+        help='Run time of diffusion model for smoothing', required=True)
+    argParser.add_argument(
+        '--filter-dt', type=float,
+        help='Time step of diffusion model', required=True)
     argParser.add_argument(
         '--dt', type=float, help='Time step', required=True)
     argParser.add_argument(
@@ -49,7 +52,8 @@ if __name__ == '__main__':
     )
 
     model.input_highres(args.highres)
+    model.init_filter()
     model.log_data_t(args.out_t, args.max_writes)
     model.log_data_tplusdt(args.out_tplusdt)
 
-    model.run(args.dt, args.filter_std)
+    model.run(args.dt, args.filter_time, args.filter_dt)
