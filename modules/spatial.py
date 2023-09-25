@@ -93,9 +93,11 @@ class Filter:
 
         data_interp = np.zeros((self.from_shape[0], self.z_fine.size))
 
-        self.field['g'] = data
+        self.field.load_from_global_grid_data(data)
         for i, pos in enumerate(self.z_fine):
-            data_interp[:,i] = self.field(z=pos).evaluate()['g'].squeeze()
+            data_interp[:,i] = (
+                self.field(z=pos).evaluate().allgather_data('g').squeeze()
+            )
 
         return data_interp
 
@@ -237,5 +239,6 @@ class Filter:
             output_core_dims=[['x', 'z']],
             exclude_dims={'x', 'z'},
             dask='allowed',
+            vectorize=True,
         )
         return data.assign_coords({'x': self.x_coarse, 'z': self.z_coarse})

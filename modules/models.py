@@ -3,12 +3,12 @@
 import logging
 import os
 
+import dask
 import dedalus.public as d3
 import numpy as np
 import xarray as xr
-import dask
 
-from modules.regridding import Regridder
+from modules import regridding, spatial
 
 logger = logging.getLogger(__name__)
 # pylint: disable=no-member, too-many-arguments, too-many-instance-attributes
@@ -31,10 +31,12 @@ class BaseModel:
         """
 
         # Parameters
+        self.aspect = aspect
+        self.Nx = Nx
+        self.Nz = Nz
         self.Rayleigh = Rayleigh
         self.Prandtl = Prandtl
         self.hyper = hyper
-        self.aspect = aspect
         self.restarted = False
         self.data_dir = ''
         self.save_interval = 1
@@ -227,7 +229,7 @@ class DNSModel(BaseModel):
             'x': self.xbasis.global_grid().flatten(),
             'z': self.zbasis.global_grid().flatten(),
         }
-        regridder = Regridder(
+        regridder = regridding.Regridder(
             data.theta, target, limits={'z': (0, 1)},
             periods={'x': self.aspect},
         )
@@ -408,6 +410,30 @@ class LESModel(LESMixin, DNSModel):
 class SingleStepModel(BaseModel):
     """Model for coarse-graining and timestepping existing data."""
 
+    # @property
+    # def boundary_conditions(self):
+    #     """
+    #     Modified boundary conditions.
+
+    #     Bae and Lozano-Durán (2017) explain that because the filtering
+    #     operation violates the w(z=0,1) = 0 boundary condition, we have
+    #     to relax the boundary condition when running the explicitly
+    #     filtered model.
+    #     """
+
+    #     self.fields['u_bottom'] = self.dist.VectorField(
+    #             self.coords, name='u_bottom', bases=self.xbasis)
+    #     self.fields['u_top'] = self.dist.VectorField(
+    #             self.coords, name='u_top', bases=self.xbasis)
+
+    #     conditions = (
+    #         (self.fields['u'](z=0), self.fields['u_bottom']),
+    #         (self.fields['u'](z=1), self.fields['u_top']),
+    #         (self.fields['theta'](z=0), 1/2),
+    #         (self.fields['theta'](z=1), -1/2),
+    #     )
+    #     return conditions
+
     def input_highres(self, file):
         """
         Prepares high-resolution input data for timestepping.
@@ -416,18 +442,14 @@ class SingleStepModel(BaseModel):
             file: NetCDF data file or glob pattern.
         """
         logger.info(f'Using high-res data from {file}')
-        with dask.config.set(**{'array.slicing.split_large_chunks': True}):
-            # pylint: disable=W0201
-            self.highres = xr.open_mfdataset(file)
-            target = {
-                'x': self.xbasis.global_grid().flatten(),
-                'z': self.zbasis.global_grid().flatten(),
-            }
-            # pylint: disable=W0201
-            self.regridder = Regridder(
-                self.highres.theta, target, limits={'z': (0, 1)},
-                periods={'x': self.aspect},
-            )
+        # pylint: disable=W0201
+        self.highres = xr.open_mfdataset(file)
+        # pylint: disable=W0201
+        self.filter = spatial.Filter(
+            (self.highres.x.size, self.highres.z.size),
+            (self.Nx, self.Nz),
+            self.aspect,
+        )
 
     def log_data_t(self, data_dir, max_writes=1000):
         """
@@ -462,13 +484,14 @@ class SingleStepModel(BaseModel):
             [self.fields['u'], self.fields['theta']], layout='g')
         logger.info(f'\tSaving time t+dt snapshots at: {data_dir:s}')
 
-    def run(self, timestep):
+    def run(self, timestep, filter_std):
         """
         Runs the simulation.
 
         Args:
             sim_time: Total simulation time.
             timestep: Time step.
+            filter_std: Filter standard deviation.
         """
 
         try:
@@ -479,14 +502,30 @@ class SingleStepModel(BaseModel):
                     self.fields[field]['g'] = 0
 
                 # Load an initial state from the coarse-grained dataset
-                u = self.regridder(
-                    self.highres.u.isel(t=i)).transpose('x', 'z').data
-                w = self.regridder(
-                    self.highres.w.isel(t=i)).transpose('x', 'z').data
-                theta = self.regridder(
-                    self.highres.theta.isel(t=i)).transpose('x', 'z').data
+                u = self.filter(
+                    self.highres.u.isel(t=i).compute(), filter_std, 'u'
+                ).transpose('x', 'z').data
+                w = self.filter(
+                    self.highres.w.isel(t=i).compute(), filter_std, 'u'
+                ).transpose('x', 'z').data
+                theta = self.filter(
+                    self.highres.theta.isel(t=i).compute(), filter_std, 'theta'
+                ).transpose('x', 'z').data
                 self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
                 self.fields['theta'].load_from_global_grid_data(theta)
+
+                # # find out u, w at z=0,1
+                # self.fields['u'].change_scales(1)
+                # u_bottom = self.fields['u']['g'][:,:,0:1]
+                # u_top = self.fields['u']['g'][:,:,-1:]
+
+                # # ensure u(z=0,1) = 0
+                # u_bottom[0,:,:] = 0
+                # u_top[0,:,:] = 0
+
+                # # update the boundary conditon for w(z=0,1)
+                # self.fields['u_bottom']['g'] = u_bottom
+                # self.fields['u_top']['g'] = u_top
 
                 # Set the sim time so it shows up correctly in the output
                 self.solver.sim_time = self.highres.t[i].item()
@@ -502,7 +541,7 @@ class SingleStepModel(BaseModel):
                     sim_time=self.solver.sim_time, timestep=self.solver.dt,
                 )
 
-                if i % 100 == 0:
+                if i % 10 == 0:
                     logger.info(f'Step {i+1:d} of {self.highres.t.size}')
         except Exception:
             logger.error('Exception raised, triggering end of main loop.')

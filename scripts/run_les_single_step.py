@@ -23,6 +23,9 @@ if __name__ == '__main__':
     argParser.add_argument(
         '--Pr', type=float, help='Prandtl number', required=True)
     argParser.add_argument(
+        '--filter-std', type=float,
+        help='Filter standard deviation', required=True)
+    argParser.add_argument(
         '--dt', type=float, help='Time step', required=True)
     argParser.add_argument(
         '--out-t', help='Output directory for time t snapshots', required=True)
@@ -47,4 +50,4 @@ if __name__ == '__main__':
     model.log_data_t(args.out_t, args.max_writes)
     model.log_data_tplusdt(args.out_tplusdt)
 
-    model.run(args.dt)
+    model.run(args.dt, args.filter_std)
