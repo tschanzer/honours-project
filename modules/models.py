@@ -473,6 +473,8 @@ class SingleStepModel(BaseModel):
 
         try:
             logger.info(f'Starting main loop with dt = {timestep:.3g}')
+            logger.info(f'Diffusion time: {filter_time:.3g}')
+            logger.info(f'Diffusion timestep: {filter_dt:.3g}')
             for i in range(self.highres.t.size):
                 # Zero all fields just to be safe
                 for field in self.fields:
@@ -524,6 +526,7 @@ class LESSingleStepModel(LESMixin, SingleStepModel):
 class DiffusionModel:
     """Diffusion model for smoothing data."""
     timestepper = d3.RK222
+    theta_bc = 1/2
 
     def __init__(self, aspect, Nx, Nz):
         """
@@ -541,10 +544,8 @@ class DiffusionModel:
         # Fundamental objects
         coords = d3.CartesianCoordinates('x', 'z')
         dist = d3.Distributor(coords, dtype=np.float64)
-        xbasis = d3.RealFourier(
-            coords['x'], size=Nx, bounds=(0, aspect), dealias=3/2)
-        zbasis = d3.ChebyshevT(
-            coords['z'], size=Nz, bounds=(0, 1), dealias=3/2)
+        xbasis = d3.RealFourier(coords['x'], size=Nx, bounds=(0, aspect))
+        zbasis = d3.ChebyshevT(coords['z'], size=Nz, bounds=(0, 1))
         _, z_hat = coords.unit_vector_fields(dist)
 
         # Fields
@@ -601,8 +602,8 @@ class DiffusionModel:
         problem.add_equation((d3.integ(self.fields['pi']), 0))
         problem.add_equation((self.fields['u'](z=0), 0))
         problem.add_equation((self.fields['u'](z=1), 0))
-        problem.add_equation((self.fields['theta'](z=0), 1/2))
-        problem.add_equation((self.fields['theta'](z=1), -1/2))
+        problem.add_equation((self.fields['theta'](z=0), self.theta_bc))
+        problem.add_equation((self.fields['theta'](z=1), -self.theta_bc))
 
         # Solver
         self.solver = problem.build_solver(self.timestepper)
@@ -643,3 +644,9 @@ class DiffusionModel:
         u_data = self.fields['u'].allgather_data('g')
         theta_data = self.fields['theta'].allgather_data('g')
         return u_data[0,:,:], u_data[1,:,:], theta_data
+
+
+class TendencyDiffusionModel(DiffusionModel):
+    """Diffusion model for smoothing tendency data."""
+
+    theta_bc = 0
