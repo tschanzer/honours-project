@@ -2,6 +2,7 @@
 /literature
 /notes
 /data
+/figures
 */.ipynb_checkpoints
 *.egg-info
 *.pyc
