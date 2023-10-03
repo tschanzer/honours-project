@@ -9,15 +9,11 @@ import numpy as np
 import xarray as xr
 
 from modules import models
+import modules.parametrisation as param
 
 logger = logging.getLogger(__name__)
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
-
-
-def tendency(state_t, state_tplusdt):
-    tend = (state_tplusdt.drop('t') - state_t.drop('t'))/state_t.timestep
-    return tend.assign_coords({'t': state_t.t})
 
 
 if __name__ == '__main__':
@@ -55,7 +51,8 @@ if __name__ == '__main__':
         if i % 10 == 0:
             logger.info(f'Processing snapshot {i+1} of {data_tplusdt.t.size}')
 
-        tend = tendency(data_t.isel(t=i), data_tplusdt.isel(t=i)).compute()
+        tend = param.tendency(
+            data_t.isel(t=i), data_tplusdt.isel(t=i)).compute()
         u_out[i,...], w_out[i,...], theta_out[i,...] = model.run(
             tend.u.data, tend.w.data, tend.theta.data,
             time=args.time, dt=args.dt, to_shape=(args.to_Nx, args.to_Nz),
