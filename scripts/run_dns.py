@@ -45,6 +45,11 @@ if __name__ == '__main__':
         help='Existing data file or glob pattern for loading state')
     argParser.add_argument(
         '--load-time', help='Sim time of initial condition', type=int)
+    argParser.add_argument(
+        '--filter-time', type=float,
+        help='Run time of diffusion model for smoothing initial condition')
+    argParser.add_argument(
+        '--filter-dt', type=float, help='Time step of diffusion model')
     args = argParser.parse_args()
 
     if args.restart_file:
@@ -63,7 +68,8 @@ if __name__ == '__main__':
     if args.restart_file:
         model.restart(args.restart_file)
     elif args.load_file:
-        model.load_from_existing(args.load_file, args.load_time)
+        model.load_from_existing(
+            args.load_file, args.load_time, args.filter_time, args.filter_dt)
     else:
         model.set_initial_conditions()
 

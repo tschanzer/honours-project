@@ -209,13 +209,15 @@ class DNSModel(BaseModel):
         self.solver.load_state(file)
         self.restarted = True
 
-    def load_from_existing(self, file, time):
+    def load_from_existing(self, file, time, filter_time, filter_dt):
         """
         Regrids and loads the state from an existing model run.
 
         Args:
             file: NetCDF data file or glob pattern.
             time: Time of state to be loaded.
+            filter_time: Run time of diffusion model for smoothing.
+            filter_dt: Time step of diffusion model.
         """
 
         data = xr.open_mfdataset(file)
@@ -225,17 +227,13 @@ class DNSModel(BaseModel):
         actual_time = data.t.item()
         logger.info(
             f'Initial condition: state at t = {actual_time:.3f} from {file}')
-        target = {
-            'x': self.xbasis.global_grid().flatten(),
-            'z': self.zbasis.global_grid().flatten(),
-        }
-        regridder = regridding.Regridder(
-            data.theta, target, limits={'z': (0, 1)},
-            periods={'x': self.aspect},
+        filter = DiffusionModel(self.aspect, data.x.size, data.z.size)
+
+        u, w, theta = filter.run(
+            data.u, data.w, data.theta,
+            time=filter_time, dt=filter_dt,
+            to_shape=(self.Nx, self.Nz),
         )
-        u = regridder(data.u).transpose('x', 'z').data
-        w = regridder(data.w).transpose('x', 'z').data
-        theta = regridder(data.theta).transpose('x', 'z').data
         self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
         self.fields['theta'].load_from_global_grid_data(theta)
 
