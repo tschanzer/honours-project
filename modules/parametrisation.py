@@ -28,8 +28,8 @@ def insert_bc(data, bottom, top, aspect=8):
 
     Args:
         data: xr.DataArray.
-        bottom: z=0 boundary condition.
-        top: z=1 boundary condition.
+        bottom: z=0 boundary condition (pass None to omit).
+        top: z=1 boundary condition (pass None to omit).
         aspect: Domain aspect ratio.
 
     Returns:
@@ -37,14 +37,16 @@ def insert_bc(data, bottom, top, aspect=8):
     """
 
     # z=0 value
-    z_bc = xr.DataArray([bottom], coords={'z': [0.]})
-    _, z_bc = xr.broadcast(data.isel(z=0), z_bc)
-    data = xr.concat([z_bc, data], dim='z')
+    if bottom is not None:
+        z_bc = xr.DataArray([bottom], coords={'z': [0.]})
+        _, z_bc = xr.broadcast(data.isel(z=0), z_bc)
+        data = xr.concat([z_bc, data], dim='z')
 
     # z=1 value
-    z_bc = xr.DataArray([top], coords={'z': [1.]})
-    _, z_bc = xr.broadcast(data.isel(z=0), z_bc)
-    data = xr.concat([data, z_bc], dim='z')
+    if top is not None:
+        z_bc = xr.DataArray([top], coords={'z': [1.]})
+        _, z_bc = xr.broadcast(data.isel(z=0), z_bc)
+        data = xr.concat([data, z_bc], dim='z')
 
     # Periodic x value
     x_bc = data.sel(x=0).assign_coords({'x': aspect})
@@ -69,5 +71,5 @@ def sample(data, x, z, bottom, top, aspect=8):
     data = insert_bc(data, bottom, top, aspect)
     return sp.interpolate.interpn(
         (data.x.data, data.z.data), data.transpose('x', 'z', 't').data,
-        np.stack([x, z], axis=1),
-    ).ravel()
+        np.stack([x, z], axis=1), bounds_error=False, fill_value=None,
+    )
