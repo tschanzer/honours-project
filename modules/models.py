@@ -6,6 +6,7 @@ import os
 import dask
 import dedalus.public as d3
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 from modules import regridding, spatial
@@ -648,3 +649,107 @@ class TendencyDiffusionModel(DiffusionModel):
     """Diffusion model for smoothing tendency data."""
 
     theta_bc = 0
+
+
+class ResTendParametrisedModel(DNSModel):
+    """Parametrisation based on resolved tendency."""
+
+    def __init__(self, *args, coef_file='', **kwargs):
+        """
+        Initialises a model using the resolved tendency parametrisation.
+
+        Args:
+            *args: See DNSModel documentation.
+            coef_file: Path to csv file with parametrisation coefficients.
+            **kwargs: See DNSModel documentation.
+        """
+
+        self.params = pd.read_csv(coef_file)
+        super().__init__(*args, **kwargs)
+
+    @property
+    def momentum_equation(self):
+        """Momentum equation."""
+        nu = np.sqrt(self.Prandtl/self.Rayleigh)
+        lap_u = d3.div(self.substitutions['grad_u'])
+
+        coeffs_u = self.params['u'].to_numpy()
+        coeffs_w = self.params['w'].to_numpy()
+        # Add 1 to the zeroth-order-in-z coefficient because we are adding
+        # the subgrid tendency to the resolved tendency
+        coeffs_u[1] += 1
+        coeffs_w[1] += 1
+
+        z = self.dist.Field(name='z', bases=self.zbasis)
+        z['g'] = self.local_grids['z']
+
+        u_func = sum([
+            coeffs_u[n+1]*(z - 1/2)**(2*n) for n in range(coeffs_u.size - 1)
+        ])
+        u_func = u_func.evaluate()
+        w_func = sum([
+            coeffs_w[n+1]*(z - 1/2)**(2*n) for n in range(coeffs_w.size - 1)
+        ])
+        w_func = w_func.evaluate()
+
+        # Form a 2x2 matrix with u_func and w_func along the diagonal.
+        # This can then be multiplied with the resolved tendency vector
+        # to get the corrected tendency vector.
+        uw_func = (
+            u_func*self.unit_vectors['x_hat']*self.unit_vectors['x_hat']
+            + w_func*self.unit_vectors['z_hat']*self.unit_vectors['z_hat']
+        )
+
+        lhs = (
+            d3.dt(self.fields['u'])
+            + uw_func @ (
+                - nu*lap_u
+                + d3.grad(self.fields['pi'])
+                - self.fields['theta']*self.unit_vectors['z_hat']
+                + self.substitutions['lift'](self.fields['tau_u2'])
+            )
+        )
+        rhs = (
+            coeffs_u[0]*self.unit_vectors['x_hat']  # constant u term
+            + coeffs_w[0]*self.unit_vectors['z_hat']  # constant w term
+            + uw_func @ (
+                -self.fields['u']@self.substitutions['grad_u']
+                + nu*self.hyper*self.taper*(lap_u@lap_u)**(1/2)*lap_u
+            )
+        )
+        return lhs, rhs
+
+    @property
+    def energy_equation(self):
+        """Energy equation."""
+        kappa = 1/np.sqrt(self.Rayleigh*self.Prandtl)
+        lap_theta = d3.div(self.substitutions['grad_theta'])
+
+        coeffs = self.params['theta'].to_numpy()
+        # Add 1 to the zeroth-order-in-z coefficient because we are adding
+        # the subgrid tendency to the resolved tendency
+        coeffs[1] += 1
+
+        z = self.dist.Field(name='z', bases=self.zbasis)
+        z['g'] = self.local_grids['z']
+
+        func = sum([
+            coeffs[n+1]*(z - 1/2)**(2*n) for n in range(coeffs.size - 1)
+        ])
+        func = func.evaluate()
+
+        lhs = (
+            d3.dt(self.fields['theta'])
+            + func * (
+                - kappa*lap_theta
+                + self.substitutions['lift'](self.fields['tau_theta2'])
+            )
+        )
+        rhs = (
+            coeffs[0]
+            + func * (
+                -self.fields['u']@self.substitutions['grad_theta']
+                + kappa*self.hyper*self.taper*abs(lap_theta)*lap_theta
+            )
+        )
+        return lhs, rhs
