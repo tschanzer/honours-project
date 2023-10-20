@@ -1,5 +1,6 @@
-"""Script to set up RBC simulations in Dedalus."""
+"""Module for simulating rayleigh-Bénard convection."""
 
+from functools import wraps
 import logging
 import os
 
@@ -15,59 +16,63 @@ logger = logging.getLogger(__name__)
 # pylint: disable=no-member, too-many-arguments, too-many-instance-attributes
 
 
-class BaseModel:
-    """Base model for Rayleigh-Benard convection."""
-    timestepper = d3.RK222
+class ModelBase:
+    """
+    Base class for Rayleigh-Bénard convection models.
 
-    def __init__(self, aspect, Nx, Nz, Rayleigh, Prandtl, hyper=0):
+    This class only handles the initial set-up of the solver; additional
+    functionality including the ability to run the model is provided
+    by subclasses.
+    """
+
+    def __init__(self, aspect, nx, nz, rayleigh, prandtl, equations):
         """
-        Builds the solver. This is the same for all simulations.
+        Builds the solver.
 
         Args:
             aspect: Domain aspect ratio.
-            Nx: Number of horizontal modes.
-            Nz: Number of vertical modes.
-            Rayleigh: Rayleigh number.
-            Prandtl: Prandtl number.
+            nx: Number of horizontal modes.
+            nz: Number of vertical modes.
+            rayleigh: Rayleigh number.
+            prandtl: Prandtl number.
+            equations: Equation class. Currently implemented options are
+                - models.DNS
+                - models.SmagorinskyLES
+                - models.ResolvedTendencyParametrisation
         """
 
         # Parameters
         self.aspect = aspect
-        self.Nx = Nx
-        self.Nz = Nz
-        self.Rayleigh = Rayleigh
-        self.Prandtl = Prandtl
-        self.hyper = hyper
-        self.restarted = False
-        self.data_dir = ''
-        self.save_interval = 1
-        self.max_writes = 1000
-        logger.info('Parameters:')
-        logger.info(f'\tRa = {Rayleigh:.2e}')
-        logger.info(f'\tPr = {Prandtl:.3f}')
-        logger.info(f'\thyper = {hyper:.2e}')
+        self.nx = nx
+        self.nz = nz
+        self.rayleigh = rayleigh
+        self.prandtl = prandtl
+        logger.info('Building solver. Base settings:')
+        logger.info(f'\tEquations: {equations.__name__}')
+        logger.info(f'\tRa = {rayleigh:.2e}')
+        logger.info(f'\tPr = {prandtl:.3f}')
         logger.info(f'\taspect = {aspect:.1f}')
-        logger.info(f'\tNx = {Nx:d}')
-        logger.info(f'\tNz = {Nz:d}')
+        logger.info(f'\tNx = {nx:d}')
+        logger.info(f'\tNz = {nz:d}')
 
         # Fundamental objects
-        self.coords = d3.CartesianCoordinates('x', 'z')
-        self.dist = d3.Distributor(self.coords, dtype=np.float64)
+        coords = d3.CartesianCoordinates('x', 'z')
+        self.dist = d3.Distributor(coords, dtype=np.float64)
         self.xbasis = d3.RealFourier(
-            self.coords['x'], size=Nx, bounds=(0, aspect), dealias=3/2)
+            coords['x'], size=nx, bounds=(0, aspect), dealias=3/2)
         self.zbasis = d3.ChebyshevT(
-            self.coords['z'], size=Nz, bounds=(0, 1), dealias=3/2)
+            coords['z'], size=nz, bounds=(0, 1), dealias=3/2)
         self.local_grids = dict(zip(
            ('x', 'z'),  self.dist.local_grids(self.xbasis, self.zbasis)
         ))
         self.unit_vectors = dict(zip(
-           ('x_hat', 'z_hat'),  self.coords.unit_vector_fields(self.dist)
+           ('x_hat', 'z_hat'),  coords.unit_vector_fields(self.dist)
         ))
 
         # Fields
         self.fields = {
             'u': self.dist.VectorField(
-                self.coords, name='u', bases=(self.xbasis, self.zbasis)),
+                coords, name='u', bases=(self.xbasis, self.zbasis)),
             'theta': self.dist.Field(
                 name='theta', bases=(self.xbasis, self.zbasis)),
             'pi': self.dist.Field(
@@ -79,9 +84,9 @@ class BaseModel:
             'tau_theta2': self.dist.Field(
                 name='tau_theta2', bases=self.xbasis),
             'tau_u1': self.dist.VectorField(
-                self.coords, name='tau_u1', bases=self.xbasis),
+                coords, name='tau_u1', bases=self.xbasis),
             'tau_u2': self.dist.VectorField(
-                self.coords, name='tau_u2', bases=self.xbasis),
+                coords, name='tau_u2', bases=self.xbasis),
         }
 
         # Substitutions
@@ -103,88 +108,41 @@ class BaseModel:
 
         # Problem
         self.problem = d3.IVP(list(self.fields.values()))
-        self.problem.add_equation(self.momentum_equation)
-        self.problem.add_equation(self.energy_equation)
-        self.problem.add_equation(self.continuity_equation)
-        self.problem.add_equation(self.gauge_condition)
-        for condition in self.boundary_conditions:
+        equations = equations(self)
+        self.problem.add_equation(equations.momentum_equation)
+        self.problem.add_equation(equations.energy_equation)
+        self.problem.add_equation(equations.continuity_equation)
+        self.problem.add_equation(equations.gauge_condition)
+        for condition in equations.boundary_conditions:
             self.problem.add_equation(condition)
 
         # Solver
-        self.solver = self.problem.build_solver(self.timestepper)
-
-    @property
-    def taper(self):
-        """Field that tapers to zero at z = 0 and z = 1."""
-        def taper_func(x):
-            return 56*x**10 - 140*x**12 + 120*x**14 - 35*x**16
-
-        field = self.dist.Field(bases=self.zbasis)
-        field['g'] = 1 - taper_func(2*self.local_grids['z'] - 1)
-        return field
-
-    @property
-    def momentum_equation(self):
-        """Momentum equation."""
-        nu = np.sqrt(self.Prandtl/self.Rayleigh)
-        lap_u = d3.div(self.substitutions['grad_u'])
-        lhs = (
-            d3.dt(self.fields['u'])
-            - nu*lap_u
-            + d3.grad(self.fields['pi'])
-            - self.fields['theta']*self.unit_vectors['z_hat']
-            + self.substitutions['lift'](self.fields['tau_u2'])
-        )
-        rhs = (
-            -self.fields['u']@self.substitutions['grad_u']
-            + nu*self.hyper*self.taper*(lap_u@lap_u)**(1/2)*lap_u
-        )
-        return lhs, rhs
-
-    @property
-    def energy_equation(self):
-        """Energy equation."""
-        kappa = 1/np.sqrt(self.Rayleigh*self.Prandtl)
-        lap_theta = d3.div(self.substitutions['grad_theta'])
-        lhs = (
-            d3.dt(self.fields['theta'])
-            - kappa*lap_theta
-            + self.substitutions['lift'](self.fields['tau_theta2'])
-        )
-        rhs = (
-            -self.fields['u']@self.substitutions['grad_theta']
-            + kappa*self.hyper*self.taper*abs(lap_theta)*lap_theta
-        )
-        return lhs, rhs
-
-    @property
-    def continuity_equation(self):
-        """Continuity equation."""
-        lhs = d3.trace(self.substitutions['grad_u']) + self.fields['tau_pi']
-        rhs = 0
-        return lhs, rhs
-
-    @property
-    def gauge_condition(self):
-        """Gauge condition."""
-        lhs = d3.integ(self.fields['pi'])
-        rhs = 0
-        return lhs, rhs
-
-    @property
-    def boundary_conditions(self):
-        """Boundary conditions."""
-        conditions = (
-            (self.fields['u'](z=0), 0),
-            (self.fields['u'](z=1), 0),
-            (self.fields['theta'](z=0), 1/2),
-            (self.fields['theta'](z=1), -1/2),
-        )
-        return conditions
+        self.solver = self.problem.build_solver(d3.RK222)
 
 
-class DNSModel(BaseModel):
-    """Model for direct numerical simulations."""
+class Model(ModelBase):
+    """
+    Model for normal simulations of Rayleigh-Bénard convection.
+
+    Usage:
+        1. Instantiate model (see documentation for models.ModelBase).
+        2. Set initial conditions using one of the following methods:
+            - Model.set_initial_conditions
+            - Model.restart
+            - Model.load_from_existing
+        3. Set up data logging using the Model.log_data method.
+        4. Optionally set up logging of snapshot pairs using the
+            Model.log_data_plusdt method.
+        5. Run the model using the Model.run method.
+    """
+
+    @wraps(ModelBase.__init__)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.restarted = False
+        self.data_dir = None
+        self.save_interval = None
+        self.max_writes = None
 
     def set_initial_conditions(self):
         """Initialises the variables for a new run."""
@@ -234,7 +192,7 @@ class DNSModel(BaseModel):
         u, w, theta = filter.run(
             data.u, data.w, data.theta,
             time=filter_time, dt=filter_dt,
-            to_shape=(self.Nx, self.Nz),
+            to_shape=(self.nx, self.nz),
         )
         self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
         self.fields['theta'].load_from_global_grid_data(theta)
@@ -336,180 +294,91 @@ class DNSModel(BaseModel):
         restarts.add_tasks(self.solver.state, layout='g')
 
 
-class LESMixin:
-    """LES equations."""
+class SingleStepModel(ModelBase):
+    """
+    Model for timestepping existing data.
 
-    @property
-    def strain_tensor(self):
-        """Strain tensor."""
-        return 0.5*(
-            self.substitutions['grad_u']
-            + d3.transpose(self.substitutions['grad_u'])
-        )
+    Usage:
+        1. Load the existing data using the
+            SingleStepModel.load_initial_states method.
+        2. Set up data logging using the
+           SingleStepModel.log_final_states method.
+        3. Run the model using the SingleStepModel.run method.
+    """
 
-    @property
-    def eddy_viscosity(self):
-        """Smagorinsky eddy viscosity."""
-        filter_width = 2
-        delta_x = filter_width*self.xbasis.local_grid_spacing(axis=0)
-        delta_z = filter_width*self.zbasis.local_grid_spacing(axis=1)
-        delta = self.dist.Field(bases=(self.xbasis, self.zbasis))
-        delta['g'] = np.sqrt(delta_x*delta_z)
+    @wraps(ModelBase.__init__)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.initial_states = None
+        self.max_writes = None
+        self.snapshots = None
 
-        smagorinsky_coeff = 0.17
-        return (
-            self.taper*(smagorinsky_coeff*delta)**2
-            * (2*d3.trace(self.strain_tensor@self.strain_tensor))**0.5
-        )
-
-    @property
-    def momentum_equation(self):
-        """Momentum equation."""
-        nu = np.sqrt(self.Prandtl/self.Rayleigh)
-        lap_u = d3.div(self.substitutions['grad_u'])
-        subgrid_stress = 2*self.eddy_viscosity*self.strain_tensor
-
-        lhs = (
-            d3.dt(self.fields['u'])
-            - nu*lap_u
-            + d3.grad(self.fields['pi'])
-            - self.fields['theta']*self.unit_vectors['z_hat']
-            + self.substitutions['lift'](self.fields['tau_u2'])
-        )
-        rhs = (
-            -self.fields['u']@self.substitutions['grad_u']
-            + d3.div(subgrid_stress)
-        )
-        return lhs, rhs
-
-    @property
-    def energy_equation(self):
-        """Energy equation."""
-        kappa = 1/np.sqrt(self.Rayleigh*self.Prandtl)
-        lap_theta = d3.div(self.substitutions['grad_theta'])
-        subgrid_flux = self.eddy_viscosity*self.substitutions['grad_theta']
-
-        lhs = (
-            d3.dt(self.fields['theta'])
-            - kappa*lap_theta
-            + self.substitutions['lift'](self.fields['tau_theta2'])
-        )
-        rhs = (
-            -self.fields['u']@self.substitutions['grad_theta']
-            + d3.div(subgrid_flux)
-        )
-        return lhs, rhs
-
-
-class LESModel(LESMixin, DNSModel):
-    """Large eddy simulation base model using the Smagorinsky closure."""
-
-    pass
-
-
-class SingleStepModel(BaseModel):
-    """Model for coarse-graining and timestepping existing data."""
-
-    def input_highres(self, file):
+    def load_initial_states(self, file):
         """
-        Prepares high-resolution input data for timestepping.
+        Loads snapshots in preparation for timestepping.
+
+        The data must be of the same resolution as this model.
 
         Args:
             file: NetCDF data file or glob pattern.
         """
-        logger.info(f'Using high-res data from {file}')
-        # pylint: disable=W0201
-        self.highres = xr.open_mfdataset(file)
 
-    def init_filter(self):
-        # pylint: disable=W0201
-        self.filter = coarse_graining.CoarseGrainer(
-            self.aspect, self.highres.x.size, self.highres.z.size,
-        )
+        self.initial_states = xr.open_mfdataset(file)
+        logger.info(f'Loaded snapshots from {file}')
 
-    def log_data_t(self, data_dir, max_writes=1000):
+    def log_final_states(self, data_dir):
         """
-        Tells the solver to save the coarse-grained data before timestepping.
-
-        Args:
-            data_dir: Directory for data output.
-            max_writes: Maximum number of writes per output file
-                (default 1000).
-        """
-
-        self.max_writes = max_writes
-        snapshots = self.solver.evaluator.add_file_handler(
-            data_dir, iter=1, max_writes=max_writes)
-        snapshots.add_tasks(
-            [self.fields['u'], self.fields['theta']], layout='g')
-        logger.info(f'\tSaving time t snapshots at: {data_dir:s}')
-
-    def log_data_tplusdt(self, data_dir):
-        """
-        Tells the solver to save the coarse-grained data after timestepping.
+        Tells the solver where to save the time-stepped output.
 
         Args:
             data_dir: Directory for data output.
         """
 
         # Omit iter argument to add_file_handler to disable auto evaluation
-        # pylint: disable=W0201
-        self.snapshots_tplusdt = self.solver.evaluator.add_file_handler(
+        self.snapshots = self.solver.evaluator.add_file_handler(
             data_dir, max_writes=self.max_writes)
-        self.snapshots_tplusdt.add_tasks(
+        self.snapshots.add_tasks(
             [self.fields['u'], self.fields['theta']], layout='g')
-        logger.info(f'\tSaving time t+dt snapshots at: {data_dir:s}')
+        logger.info(f'\tSaving output at: {data_dir:s}')
 
-    def run(self, timestep, filter_time, filter_dt):
+    def run(self, timestep):
         """
-        Runs the simulation.
+        Performs the time-stepping.
 
         Args:
-            sim_time: Total simulation time.
             timestep: Time step.
-            filter_time: Run time of diffusion model for smoothing.
-            filter_dt: Time step of diffusion model.
         """
 
         try:
             logger.info(f'Starting main loop with dt = {timestep:.3g}')
-            logger.info(f'Diffusion time: {filter_time:.3g}')
-            logger.info(f'Diffusion timestep: {filter_dt:.3g}')
-            for i in range(self.highres.t.size):
+            for i in range(self.initial_states.t.size):
                 # Zero all fields just to be safe
                 for field in self.fields:
                     self.fields[field]['g'] = 0
 
-                # Smooth the high-res state by running it throgh the
-                # diffusion model
-                u, w, theta = self.filter.run(
-                    self.highres.u.isel(t=i).compute(),
-                    self.highres.w.isel(t=i).compute(),
-                    self.highres.theta.isel(t=i).compute(),
-                    time=filter_time,
-                    dt=filter_dt,
-                    to_shape=(self.Nx, self.Nz),
-                )
-                # Load the smoothed state into the solver
+                # Load the next snapshot into the solver
+                u = self.initial_states.u.isel(t=i).compute()
+                w = self.initial_states.w.isel(t=i).compute()
+                theta = self.initial_states.theta.isel(t=i).compute()
                 self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
                 self.fields['theta'].load_from_global_grid_data(theta)
 
                 # Set the sim time so it shows up correctly in the output
-                self.solver.sim_time = self.highres.t[i].item()
+                self.solver.sim_time = self.initial_states.t[i].item()
 
-                # Perform one timestep (this automatically saves the initial
-                # state)
+                # Perform one timestep
                 self.solver.step(timestep)
 
                 # Save the model state after the timestep
                 self.solver.evaluator.evaluate_handlers(
-                    [self.snapshots_tplusdt], iteration=self.solver.iteration,
+                    [self.snapshots], iteration=self.solver.iteration,
                     wall_time=self.solver.wall_time,
                     sim_time=self.solver.sim_time, timestep=self.solver.dt,
                 )
 
                 if i % 10 == 0:
-                    logger.info(f'Step {i+1:d} of {self.highres.t.size}')
+                    logger.info(
+                        f'Step {i+1:d} of {self.initial_states.t.size}')
         except Exception:
             logger.error('Exception raised, triggering end of main loop.')
             raise
@@ -517,33 +386,183 @@ class SingleStepModel(BaseModel):
             self.solver.log_stats()
 
 
-class LESSingleStepModel(LESMixin, SingleStepModel):
-    """LES model for coarse-graining and timestepping existing data."""
+def zero_gauge(self):
+    """Zero-mean pressure gauge condition."""
+    lhs = d3.integ(self.model.fields['pi'])
+    rhs = 0
+    return lhs, rhs
 
-    pass
+
+def noslip_isothermal(self):
+    """Classical no-slip, isothermal boundary conditions."""
+    model = self.model
+    conditions = (
+        (model.fields['u'](z=0), 0),
+        (model.fields['u'](z=1), 0),
+        (model.fields['theta'](z=0), 1/2),
+        (model.fields['theta'](z=1), -1/2),
+    )
+    return conditions
 
 
-class ResTendParametrisedModel(DNSModel):
-    """Parametrisation based on resolved tendency."""
+def divergence_free(self):
+    """Continuity equation for incompressible fluids."""
+    model = self.model
+    lhs = d3.trace(model.substitutions['grad_u']) + model.fields['tau_pi']
+    rhs = 0
+    return lhs, rhs
 
-    def __init__(self, *args, coef_file='', **kwargs):
-        """
-        Initialises a model using the resolved tendency parametrisation.
 
-        Args:
-            *args: See DNSModel documentation.
-            coef_file: Path to csv file with parametrisation coefficients.
-            **kwargs: See DNSModel documentation.
-        """
+class DNS:
+    """Equation class for direct numerical simulations."""
 
-        self.params = pd.read_csv(coef_file)
-        super().__init__(*args, **kwargs)
+    gauge_condition = property(zero_gauge)
+    boundary_conditions = property(noslip_isothermal)
+    continuity_equation = property(divergence_free)
+
+    def __init__(self, model):
+        """Instantiates the equation class."""
+        self.model = model
 
     @property
     def momentum_equation(self):
         """Momentum equation."""
-        nu = np.sqrt(self.Prandtl/self.Rayleigh)
-        lap_u = d3.div(self.substitutions['grad_u'])
+        model = self.model
+        nu = np.sqrt(model.prandtl/model.rayleigh)
+        lap_u = d3.div(model.substitutions['grad_u'])
+        lhs = (
+            d3.dt(model.fields['u'])
+            - nu*lap_u
+            + d3.grad(model.fields['pi'])
+            - model.fields['theta']*model.unit_vectors['z_hat']
+            + model.substitutions['lift'](model.fields['tau_u2'])
+        )
+        rhs = -model.fields['u']@model.substitutions['grad_u']
+        return lhs, rhs
+
+    @property
+    def energy_equation(self):
+        """Energy equation."""
+        model = self.model
+        kappa = 1/np.sqrt(model.rayleigh*model.prandtl)
+        lap_theta = d3.div(model.substitutions['grad_theta'])
+        lhs = (
+            d3.dt(model.fields['theta'])
+            - kappa*lap_theta
+            + model.substitutions['lift'](model.fields['tau_theta2'])
+        )
+        rhs = -model.fields['u']@model.substitutions['grad_theta']
+        return lhs, rhs
+
+
+class SmagorinskyLES:
+    """Equation class for LES using the Smagorinsky closure."""
+
+    gauge_condition = property(zero_gauge)
+    boundary_conditions = property(noslip_isothermal)
+    continuity_equation = property(divergence_free)
+
+    def __init__(self, model):
+        """Instantiates the equation class."""
+        self.model = model
+
+    @property
+    def strain_tensor(self):
+        """Strain tensor."""
+        model = self.model
+        return 0.5*(
+            model.substitutions['grad_u']
+            + d3.transpose(model.substitutions['grad_u'])
+        )
+
+    @property
+    def damping(self):
+        """van Driest damping function."""
+        raise NotImplementedError
+
+    @property
+    def eddy_viscosity(self):
+        """Smagorinsky eddy viscosity."""
+        model = self.model
+        filter_width = 2
+        delta_x = filter_width*model.xbasis.local_grid_spacing(axis=0)
+        delta_z = filter_width*model.zbasis.local_grid_spacing(axis=1)
+        delta = model.dist.Field(bases=(model.xbasis, model.zbasis))
+        delta['g'] = np.sqrt(delta_x*delta_z)
+
+        smagorinsky_coeff = 0.17
+        return (
+            (smagorinsky_coeff*delta*self.damping)**2
+            * (2*d3.trace(self.strain_tensor@self.strain_tensor))**0.5
+        )
+
+    @property
+    def momentum_equation(self):
+        """Momentum equation."""
+        model = self.model
+        nu = np.sqrt(model.prandtl/model.rayleigh)
+        lap_u = d3.div(model.substitutions['grad_u'])
+        subgrid_stress = 2*self.eddy_viscosity*self.strain_tensor
+
+        lhs = (
+            d3.dt(model.fields['u'])
+            - nu*lap_u
+            + d3.grad(model.fields['pi'])
+            - model.fields['theta']*model.unit_vectors['z_hat']
+            + model.substitutions['lift'](model.fields['tau_u2'])
+        )
+        rhs = (
+            -model.fields['u']@model.substitutions['grad_u']
+            + d3.div(subgrid_stress)
+        )
+        return lhs, rhs
+
+    @property
+    def energy_equation(self):
+        """Energy equation."""
+        model = self.model
+        kappa = 1/np.sqrt(model.rayleigh*model.prandtl)
+        lap_theta = d3.div(model.substitutions['grad_theta'])
+        subgrid_flux = self.eddy_viscosity*model.substitutions['grad_theta']
+
+        lhs = (
+            d3.dt(model.fields['theta'])
+            - kappa*lap_theta
+            + model.substitutions['lift'](model.fields['tau_theta2'])
+        )
+        rhs = (
+            -model.fields['u']@model.substitutions['grad_theta']
+            + d3.div(subgrid_flux)
+        )
+        return lhs, rhs
+
+
+class ResolvedTendencyParametrisation(SmagorinskyLES):
+    """Parametrisation scheme based on resolved tendencies."""
+
+    gauge_condition = property(zero_gauge)
+    boundary_conditions = property(noslip_isothermal)
+    continuity_equation = property(divergence_free)
+
+    def __init__(self, model, coef_file):
+        """
+        Initialises the parametrisation scheme.
+
+        Args:
+            model: models.Model instance.
+            coef_file: Path to csv file with parametrisation coefficients.
+        """
+
+        super().__init__(model)
+        self.params = pd.read_csv(coef_file)
+
+    @property
+    def momentum_equation(self):
+        """Momentum equation."""
+        model = self.model
+        nu = np.sqrt(model.prandtl/model.rayleigh)
+        lap_u = d3.div(model.substitutions['grad_u'])
+        subgrid_stress = 2*self.eddy_viscosity*self.strain_tensor
 
         coeffs_u = self.params['u'].to_numpy()
         coeffs_w = self.params['w'].to_numpy()
@@ -552,8 +571,8 @@ class ResTendParametrisedModel(DNSModel):
         coeffs_u[1] += 1
         coeffs_w[1] += 1
 
-        z = self.dist.Field(name='z', bases=self.zbasis)
-        z['g'] = self.local_grids['z']
+        z = model.dist.Field(name='z', bases=model.zbasis)
+        z['g'] = model.local_grids['z']
 
         u_func = sum([
             coeffs_u[n+1]*(z - 1/2)**(2*n) for n in range(coeffs_u.size - 1)
@@ -568,25 +587,25 @@ class ResTendParametrisedModel(DNSModel):
         # This can then be multiplied with the resolved tendency vector
         # to get the corrected tendency vector.
         uw_func = (
-            u_func*self.unit_vectors['x_hat']*self.unit_vectors['x_hat']
-            + w_func*self.unit_vectors['z_hat']*self.unit_vectors['z_hat']
+            u_func*model.unit_vectors['x_hat']*model.unit_vectors['x_hat']
+            + w_func*model.unit_vectors['z_hat']*model.unit_vectors['z_hat']
         )
 
         lhs = (
-            d3.dt(self.fields['u'])
+            d3.dt(model.fields['u'])
             + uw_func @ (
                 - nu*lap_u
-                + d3.grad(self.fields['pi'])
-                - self.fields['theta']*self.unit_vectors['z_hat']
-                + self.substitutions['lift'](self.fields['tau_u2'])
+                + d3.grad(model.fields['pi'])
+                - model.fields['theta']*model.unit_vectors['z_hat']
+                + model.substitutions['lift'](model.fields['tau_u2'])
             )
         )
         rhs = (
             # coeffs_u[0]*self.unit_vectors['x_hat']  # constant u term
             # + coeffs_w[0]*self.unit_vectors['z_hat']  # constant w term
             uw_func @ (
-                -self.fields['u']@self.substitutions['grad_u']
-                + nu*self.hyper*self.taper*(lap_u@lap_u)**(1/2)*lap_u
+                -model.fields['u']@model.substitutions['grad_u']
+                + d3.div(subgrid_stress)
             )
         )
         return lhs, rhs
@@ -594,16 +613,18 @@ class ResTendParametrisedModel(DNSModel):
     @property
     def energy_equation(self):
         """Energy equation."""
-        kappa = 1/np.sqrt(self.Rayleigh*self.Prandtl)
-        lap_theta = d3.div(self.substitutions['grad_theta'])
+        model = self.model
+        kappa = 1/np.sqrt(model.rayleigh*model.prandtl)
+        lap_theta = d3.div(model.substitutions['grad_theta'])
+        subgrid_flux = self.eddy_viscosity*model.substitutions['grad_theta']
 
         coeffs = self.params['theta'].to_numpy()
         # Add 1 to the zeroth-order-in-z coefficient because we are adding
         # the subgrid tendency to the resolved tendency
         coeffs[1] += 1
 
-        z = self.dist.Field(name='z', bases=self.zbasis)
-        z['g'] = self.local_grids['z']
+        z = model.dist.Field(name='z', bases=model.zbasis)
+        z['g'] = model.local_grids['z']
 
         func = sum([
             coeffs[n+1]*(z - 1/2)**(2*n) for n in range(coeffs.size - 1)
@@ -611,17 +632,17 @@ class ResTendParametrisedModel(DNSModel):
         func = func.evaluate()
 
         lhs = (
-            d3.dt(self.fields['theta'])
+            d3.dt(model.fields['theta'])
             + func * (
                 - kappa*lap_theta
-                + self.substitutions['lift'](self.fields['tau_theta2'])
+                + model.substitutions['lift'](model.fields['tau_theta2'])
             )
         )
         rhs = (
             # coeffs[0]
             func * (
-                -self.fields['u']@self.substitutions['grad_theta']
-                + kappa*self.hyper*self.taper*abs(lap_theta)*lap_theta
+                -model.fields['u']@model.substitutions['grad_theta']
+                + d3.div(subgrid_flux)
             )
         )
         return lhs, rhs
