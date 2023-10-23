@@ -1,0 +1,25 @@
+# DNS experiment for estimating viscous length scale
+
+equations:
+    class: !!python/name:modules.models.DNS
+
+parameters:
+    aspect: 8.0
+    nx: 1024
+    nz: 128
+    rayleigh: 1.0e+9
+    prandtl: 1.0
+
+initial_condition:
+    type: prescribed
+
+output:
+    dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/viscous_lengthscale
+    save_sim_time: 0.2
+    max_writes: 300
+
+run:
+    sim_time: 200
+    timestep: 2.0e-3
+
+logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/viscous_lengthscale/viscous_lengthscale.log

@@ -1,4 +1,4 @@
-"""Module for simulating rayleigh-Bénard convection."""
+"""Module for simulating Rayleigh-Bénard convection."""
 
 from functools import wraps
 import logging
@@ -25,20 +25,24 @@ class ModelBase:
     by subclasses.
     """
 
-    def __init__(self, aspect, nx, nz, rayleigh, prandtl, equations):
+    def __init__(
+            self, equations, aspect, nx, nz, rayleigh, prandtl,
+            *eqn_args, **eqn_kwargs):
         """
         Builds the solver.
 
         Args:
+            equations: Equation class. Currently implemented options are
+                - models.DNS
+                - models.SmagorinskyLES
+                - models.ResolvedTendencyParametrisation
             aspect: Domain aspect ratio.
             nx: Number of horizontal modes.
             nz: Number of vertical modes.
             rayleigh: Rayleigh number.
             prandtl: Prandtl number.
-            equations: Equation class. Currently implemented options are
-                - models.DNS
-                - models.SmagorinskyLES
-                - models.ResolvedTendencyParametrisation
+            eqn_args, eqn_kwargs: Additional arguments for the equation
+                class.
         """
 
         # Parameters
@@ -47,13 +51,6 @@ class ModelBase:
         self.nz = nz
         self.rayleigh = rayleigh
         self.prandtl = prandtl
-        logger.info('Building solver. Base settings:')
-        logger.info(f'\tEquations: {equations.__name__}')
-        logger.info(f'\tRa = {rayleigh:.2e}')
-        logger.info(f'\tPr = {prandtl:.3f}')
-        logger.info(f'\taspect = {aspect:.1f}')
-        logger.info(f'\tNx = {nx:d}')
-        logger.info(f'\tNz = {nz:d}')
 
         # Fundamental objects
         coords = d3.CartesianCoordinates('x', 'z')
@@ -108,7 +105,7 @@ class ModelBase:
 
         # Problem
         self.problem = d3.IVP(list(self.fields.values()))
-        equations = equations(self)
+        equations = equations(self, *eqn_args, **eqn_kwargs)
         self.problem.add_equation(equations.momentum_equation)
         self.problem.add_equation(equations.energy_equation)
         self.problem.add_equation(equations.continuity_equation)
@@ -140,14 +137,12 @@ class Model(ModelBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.restarted = False
-        self.data_dir = None
-        self.save_interval = None
+        self.dir = None
+        self.save_iter = None
         self.max_writes = None
 
     def set_initial_conditions(self):
         """Initialises the variables for a new run."""
-        logger.info('Initial condition: wavy_theta')
-
         k_base = 4
         k_perturb = 41
 
@@ -164,7 +159,6 @@ class Model(ModelBase):
 
     def restart(self, file):
         """Loads a model state from a restart file."""
-        logger.info(f'Initial condition: restart from {file}')
         self.solver.load_state(file)
         self.restarted = True
 
@@ -184,8 +178,6 @@ class Model(ModelBase):
             data = data.drop_duplicates('t')
         data = data.sel(t=time, method='nearest').compute()
         actual_time = data.t.item()
-        logger.info(
-            f'Initial condition: state at t = {actual_time:.3f} from {file}')
         filter = coarse_graining.CoarseGrainer(
             self.aspect, data.x.size, data.z.size)
 
@@ -197,51 +189,47 @@ class Model(ModelBase):
         self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
         self.fields['theta'].load_from_global_grid_data(theta)
 
-    def log_data(self, data_dir, save_interval, max_writes=1000):
+    def log_data(self, dir, save_sim_time, max_writes, timestep):
         """
         Tells the solver to save output to a file.
 
         Args:
-            data_dir: Directory for data output.
-            save_interval: Number of time steps between saves.
+            dir: Directory for data output.
+            save_sim_time: Snapshot interval in model time units
+                (will be rounded to nearest multiple of time step).
             max_writes: Maximum number of writes per output file
                 (default 1000).
         """
 
-        self.data_dir = data_dir
-        self.save_interval = save_interval
+        self.dir = dir
+        self.save_iter = round(save_sim_time/timestep)
         self.max_writes = max_writes
 
         snapshots = self.solver.evaluator.add_file_handler(
-            data_dir, iter=save_interval, max_writes=max_writes,
+            dir, iter=self.save_iter, max_writes=max_writes,
             mode=('append' if self.restarted else 'overwrite'),
         )
         snapshots.add_tasks(
             [self.fields['u'], self.fields['theta']], layout='g')
-        logger.info('Output settings:')
-        logger.info(f'\tDirectory: {data_dir:s}')
-        logger.info(f'\tLogging interval: {save_interval:d}*dt')
-        logger.info(f'\tMax writes per file: {max_writes:d}')
 
-    def log_data_plusdt(self, data_dir):
+    def log_data_plusdt(self, dir):
         """
         Saves a second dataset with snapshots lagged by one time step.
 
         Args:
-            data_dir: Directory for data output.
+            dir: Directory for data output.
         """
 
         snapshots = self.solver.evaluator.add_file_handler(
-            data_dir,
+            dir,
             custom_schedule=(
-                lambda **kw: kw['iteration'] % self.save_interval == 1
+                lambda **kw: kw['iteration'] % self.save_iter == 1
             ),
             max_writes=self.max_writes,
             mode=('append' if self.restarted else 'overwrite'),
         )
         snapshots.add_tasks(
             [self.fields['u'], self.fields['theta']], layout='g')
-        logger.info(f'\tSaving t+dt snapshots at: {data_dir:s}')
 
     def run(self, sim_time, timestep):
         """
@@ -254,13 +242,11 @@ class Model(ModelBase):
 
         self._log_checkpoints(sim_time, timestep)
         self.solver.stop_sim_time = sim_time
-        logger.info(f'Simulation length: t_max = {sim_time:.3g}')
 
         flow = d3.GlobalFlowProperty(self.solver, cadence=100)
         flow.add_property(self.fields['u']@self.fields['u'], name='magsq_u')
 
         try:
-            logger.info(f'Starting main loop with dt = {timestep:.3g}')
             while self.solver.proceed:
                 self.solver.step(timestep)
                 if self.solver.iteration % 100 == 1:
@@ -283,12 +269,12 @@ class Model(ModelBase):
         """Tells the solver to save a restart file at the end."""
         def restart_schedule(iteration, **_):
             last_save = (
-                (sim_time//(self.save_interval*timestep))*self.save_interval
+                (sim_time//(self.save_iter*timestep))*self.save_iter
             )
             return iteration == last_save
 
         restarts = self.solver.evaluator.add_file_handler(
-            os.path.join(self.data_dir, 'restart'), max_writes=1,
+            os.path.join(self.dir, 'restart'), max_writes=1,
             custom_schedule=restart_schedule, mode='append',
         )
         restarts.add_tasks(self.solver.state, layout='g')
@@ -310,7 +296,6 @@ class SingleStepModel(ModelBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.initial_states = None
-        self.max_writes = None
         self.snapshots = None
 
     def load_initial_states(self, file):
@@ -324,22 +309,22 @@ class SingleStepModel(ModelBase):
         """
 
         self.initial_states = xr.open_mfdataset(file)
-        logger.info(f'Loaded snapshots from {file}')
 
-    def log_final_states(self, data_dir):
+    def log_final_states(self, dir, max_writes):
         """
         Tells the solver where to save the time-stepped output.
 
         Args:
-            data_dir: Directory for data output.
+            dir: Directory for data output.
+            max_writes: Maximum number of writes per output file
+                (default 1000).
         """
 
         # Omit iter argument to add_file_handler to disable auto evaluation
         self.snapshots = self.solver.evaluator.add_file_handler(
-            data_dir, max_writes=self.max_writes)
+            dir, max_writes=max_writes)
         self.snapshots.add_tasks(
             [self.fields['u'], self.fields['theta']], layout='g')
-        logger.info(f'\tSaving output at: {data_dir:s}')
 
     def run(self, timestep):
         """
@@ -350,7 +335,6 @@ class SingleStepModel(ModelBase):
         """
 
         try:
-            logger.info(f'Starting main loop with dt = {timestep:.3g}')
             for i in range(self.initial_states.t.size):
                 # Zero all fields just to be safe
                 for field in self.fields:
