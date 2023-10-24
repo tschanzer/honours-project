@@ -9,39 +9,30 @@ import yaml
 
 from modules import models
 
-
-
 comm = MPI.COMM_WORLD
 rank = comm.rank
 size = comm.size
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Runs Rayleigh-Bénard models'
-    )
-    parser.add_argument('config', help='YAML config file')
-    parser.add_argument('-k', '--key', help='Top-level config key')
-    args = parser.parse_args()
 
-    with open(args.config, 'r') as f:
-        config = yaml.load(f, yaml.UnsafeLoader)
-    if args.key is not None:
-        config = config[args.key]
+def run(config):
+    """
+    Run a simulation using a configuration dictionary.
 
-    # Create the output directory so the logfile can be created
-    if rank == 0:
-        if config['initial_condition'] != 'restart':
-            os.mkdir(config['output']['dir'])
+    Args:
+        config: Configuration dictionary.
+    """
 
     comm.Barrier()
     logger = logging.getLogger()
     if rank == 0:
         logger.setLevel(logging.INFO)
     else:
-        logger.setLevel(logging.CRITICAL + 1)
+        logger.setLevel(logging.CRITICAL + 1)  # disable logging entirely
+
     # Dedalus adds a StreamHandler to the root logger so we need to remove it
     for h in logging.root.handlers:
         logging.root.removeHandler(h)
+
     handler = logging.FileHandler(config['logfile'])
     formatter = logging.Formatter(
         '%(asctime)s %(name)s {}/{} %(levelname)s :: %(message)s'
@@ -72,3 +63,25 @@ if __name__ == '__main__':
         model.log_data_plusdt(**config['pair_output'])
 
     model.run(**config['run'])
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Runs Rayleigh-Bénard models'
+    )
+    parser.add_argument('config', help='YAML config file')
+    parser.add_argument('-k', '--key', help='Top-level config key')
+    args = parser.parse_args()
+
+    with open(args.config, 'r') as f:
+        config = yaml.load(f, yaml.UnsafeLoader)
+
+    if args.key is not None:
+        config = config[args.key]
+
+    # Create the output directory so the logfile can be created
+    if rank == 0:
+        if config['initial_condition'] != 'restart':
+            os.mkdir(config['output']['dir'])
+
+    run(config)

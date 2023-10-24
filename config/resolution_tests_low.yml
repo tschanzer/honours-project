@@ -1,0 +1,28 @@
+# Resolution dependence experiments (up to 1024x128)
+
+base:
+    equations:
+        class: !!python/name:modules.models.SmagorinskyLES
+        delta_nu: 2.2e-3
+    parameters:
+        aspect: 8.0
+        nx: 1024  # changes
+        nz: 128  # changes
+        rayleigh: 1.0e+9
+        prandtl: 1.0
+    initial_condition:
+        type: prescribed
+    output:
+        dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/resolution_tests/1024x128  # changes
+        save_sim_time: 0.2
+        max_writes: 300  # changes
+    run:
+        sim_time: 1000
+        timestep: 2.0e-3  # changes
+    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/resolution_tests/1024x128/1024x128.log  # changes
+
+runs:
+    - [1024, 128]
+    - [768, 96]
+    - [512, 64]
+    - [256, 32]
