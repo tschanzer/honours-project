@@ -446,9 +446,10 @@ class SmagorinskyLES:
     boundary_conditions = property(noslip_isothermal)
     continuity_equation = property(divergence_free)
 
-    def __init__(self, model):
+    def __init__(self, model, delta_nu):
         """Instantiates the equation class."""
         self.model = model
+        self.delta_nu = delta_nu
 
     @property
     def strain_tensor(self):
@@ -462,7 +463,13 @@ class SmagorinskyLES:
     @property
     def damping(self):
         """van Driest damping function."""
-        raise NotImplementedError
+        a_plus = 26.
+        model = self.model
+        z = model.local_grids['z']
+        z_plus = np.minimum(z, 1 - z)/self.delta_nu
+        field = model.dist.Field(name='damping', bases=model.zbasis)
+        field['g'] = 1 - np.exp(-z_plus/a_plus)
+        return field
 
     @property
     def eddy_viscosity(self):
@@ -528,16 +535,17 @@ class ResolvedTendencyParametrisation(SmagorinskyLES):
     boundary_conditions = property(noslip_isothermal)
     continuity_equation = property(divergence_free)
 
-    def __init__(self, model, coef_file):
+    def __init__(self, model, delta_nu, coef_file):
         """
         Initialises the parametrisation scheme.
 
         Args:
             model: models.Model instance.
+            delta_nu: Viscous length scale for Smagorinsky scheme.
             coef_file: Path to csv file with parametrisation coefficients.
         """
 
-        super().__init__(model)
+        super().__init__(model, delta_nu)
         self.params = pd.read_csv(coef_file)
 
     @property
