@@ -2,8 +2,9 @@
 
 base:
     equations:
-        class: !!python/name:modules.models.SmagorinskyLES
-        delta_nu: 2.2e-3
+        class: !!python/name:modules.models.NonlinearHyperviscosity
+        hyper: 1.0e-3
+        delta_nu: 2.0e-3
     parameters:
         aspect: 8.0
         nx: 1024  # changes
@@ -11,7 +12,9 @@ base:
         rayleigh: 1.0e+9
         prandtl: 1.0
     initial_condition:
-        type: prescribed
+        type: interpolate
+        file: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/init/init_s1.nc
+        time: 50.0
     output:
         dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/resolution_tests/1024x128  # changes
         save_sim_time: 0.2
@@ -22,7 +25,7 @@ base:
     logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/resolution_tests/1024x128/1024x128.log  # changes
 
 runs:
-    - [1024, 128]
-    - [768, 96]
+    - [256, 64]
     - [512, 64]
-    - [256, 32]
+    - [768, 96]
+    - [1024, 128]

@@ -169,7 +169,7 @@ class Model(ModelBase):
         )
         self.fields['theta']['g'] *= 1e-2  # reduce magnitude of perturbation
         self.fields['theta']['g'] *= 1 - (2*z - 1)**2  # reduce to 0 at z=0,1
-        self.fields['theta']['g'] += 0.5 - z  # add linear profile
+        self.fields['theta']['g'] += 0.5*(1 - 2*z)**9  # add linear profile
 
     def restart(self, file):
         """Loads a model state from a restart file."""
@@ -481,6 +481,67 @@ class DNS:
         return lhs, rhs
 
 
+class NonlinearHyperviscosity:
+    """Equation class for simulations with nonlinear hyperviscosity."""
+
+    gauge_condition = property(zero_gauge)
+    boundary_conditions = property(noslip_isothermal)
+    continuity_equation = property(divergence_free)
+
+    def __init__(self, model, hyper, delta_nu):
+        """Instantiates the equation class."""
+        self.model = model
+        self.hyper = hyper
+        self.delta_nu = delta_nu
+
+    @property
+    def damping(self):
+        """van Driest damping function."""
+        a_plus = 26.
+        model = self.model
+        z = model.local_grids['z']
+        z_plus = np.minimum(z, 1 - z)/self.delta_nu
+        field = model.dist.Field(name='damping', bases=model.zbasis)
+        field['g'] = 1 - np.exp(-z_plus/a_plus)
+        return field
+
+    @property
+    def momentum_equation(self):
+        """Momentum equation."""
+        model = self.model
+        nu = np.sqrt(model.prandtl/model.rayleigh)
+        lap_u = d3.div(model.substitutions['grad_u'])
+        lhs = (
+            d3.dt(model.fields['u'])
+            - nu*lap_u
+            + d3.grad(model.fields['pi'])
+            - model.fields['theta']*model.unit_vectors['z_hat']
+            + model.substitutions['lift'](model.fields['tau_u2'])
+        )
+        rhs = (
+            -model.fields['u']@model.substitutions['grad_u']
+            + nu*self.hyper*self.damping*(lap_u@lap_u)**(1/2)*lap_u
+        )
+        return lhs, rhs
+
+    @property
+    def energy_equation(self):
+        """Energy equation."""
+        model = self.model
+        kappa = 1/np.sqrt(model.rayleigh*model.prandtl)
+        lap_theta = d3.div(model.substitutions['grad_theta'])
+        lhs = (
+            d3.dt(model.fields['theta'])
+            - kappa*lap_theta
+            + model.substitutions['lift'](model.fields['tau_theta2'])
+        )
+        rhs = (
+            -model.fields['u']@model.substitutions['grad_theta']
+            + kappa*self.hyper*self.damping*abs(lap_theta)*lap_theta
+        )
+        return lhs, rhs
+
+
 class SmagorinskyLES:
     """Equation class for LES using the Smagorinsky closure."""
 
@@ -488,9 +549,10 @@ class SmagorinskyLES:
     boundary_conditions = property(noslip_isothermal)
     continuity_equation = property(divergence_free)
 
-    def __init__(self, model, delta_nu):
+    def __init__(self, model, filter_width, delta_nu):
         """Instantiates the equation class."""
         self.model = model
+        self.filter_width = filter_width
         self.delta_nu = delta_nu
 
     @property
@@ -517,9 +579,8 @@ class SmagorinskyLES:
     def eddy_viscosity(self):
         """Smagorinsky eddy viscosity."""
         model = self.model
-        filter_width = 2
-        delta_x = filter_width*model.xbasis.local_grid_spacing(axis=0)
-        delta_z = filter_width*model.zbasis.local_grid_spacing(axis=1)
+        delta_x = self.filter_width*model.xbasis.local_grid_spacing(axis=0)
+        delta_z = self.filter_width*model.zbasis.local_grid_spacing(axis=1)
         delta = model.dist.Field(bases=(model.xbasis, model.zbasis))
         delta['g'] = np.sqrt(delta_x*delta_z)
 
