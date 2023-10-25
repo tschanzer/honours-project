@@ -53,8 +53,10 @@ def run(config):
             model.set_initial_conditions()
         case 'restart':
             model.restart(**config['initial_condition'])
-        case 'existing':
-            model.load_from_existing(**config['initial_condition'])
+        case 'coarse_grain':
+            model.coarse_grain_from_existing(**config['initial_condition'])
+        case 'interpolate':
+            model.interp_from_existing(**config['initial_condition'])
         case _:
             raise ValueError('Invalid initial condition type')
 

@@ -10,9 +10,10 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from modules import coarse_graining
+from modules import coarse_graining, tools
 
 logger = logging.getLogger(__name__)
+RNG_SEED = 0
 # pylint: disable=no-member, too-many-arguments, too-many-instance-attributes
 
 
@@ -143,28 +144,41 @@ class Model(ModelBase):
 
     def set_initial_conditions(self):
         """Initialises the variables for a new run."""
-        k_base = 4
-        k_perturb = 41
-
-        def exp_term(x):
-            base_wave = np.cos(2*np.pi*k_base*x/self.aspect)
-            perturb_wave = np.cos(2*np.pi*k_perturb*(x - 0.25)/self.aspect)
-            mod_wave = np.cos(np.pi*x/2)**4
-            return base_wave + 0.1*perturb_wave*mod_wave
-
         x = self.local_grids['x']
         z = self.local_grids['z']
-        exp = 6 - np.where(z < 0.5, exp_term(x), exp_term(x - 1))
-        self.fields['theta']['g'] = -0.5*np.sign(z - 0.5)*np.abs(2*z - 1)**exp
+
+        # Streamfunction satisfies these BCs:
+        #   psi(z=0,1) = 0
+        #   d(psi)/dz(z=0,1) = 0
+        #   psi(x=0) = psi(x=aspect)
+        k_base = self.aspect/2
+        psi = self.dist.Field(bases=(self.xbasis, self.zbasis))
+        psi['g'] = 0.1*(
+            np.sin(2*np.pi*k_base*x/self.aspect)
+            * (1 - (2*z - 1)**2)**2
+        )
+
+        # u = -d(psi)/dz, w = d(psi)/dx
+        u_temp = d3.Skew(d3.Gradient(psi)).evaluate()
+        u_temp.change_scales(1.)
+        self.fields['u']['g'] = np.copy(u_temp['g'])
+
+        # Fill temperature field with random numbers from N(0,1)
+        self.fields['theta'].fill_random(
+            layout='g', seed=RNG_SEED, distribution='standard_normal',
+        )
+        self.fields['theta']['g'] *= 1e-2  # reduce magnitude of perturbation
+        self.fields['theta']['g'] *= 1 - (2*z - 1)**2  # reduce to 0 at z=0,1
+        self.fields['theta']['g'] += 0.5 - z  # add linear profile
 
     def restart(self, file):
         """Loads a model state from a restart file."""
         self.solver.load_state(file)
         self.restarted = True
 
-    def load_from_existing(self, file, time, filter_time, filter_dt):
+    def coarse_grain_from_existing(self, file, time, filter_time, filter_dt):
         """
-        Regrids and loads the state from an existing model run.
+        Coarse-grains and loads the state from an existing model run.
 
         Args:
             file: NetCDF data file or glob pattern.
@@ -178,6 +192,8 @@ class Model(ModelBase):
             data = data.drop_duplicates('t')
         data = data.sel(t=time, method='nearest').compute()
         actual_time = data.t.item()
+        logger.info(f'Actual loaded sim time: {actual_time}')
+
         filter = coarse_graining.CoarseGrainer(
             self.aspect, data.x.size, data.z.size)
 
@@ -188,6 +204,32 @@ class Model(ModelBase):
         )
         self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
         self.fields['theta'].load_from_global_grid_data(theta)
+
+    def interp_from_existing(self, file, time):
+        """
+        Interpolates and loads the state from an existing model run.
+
+        Args:
+            file: NetCDF data file or glob pattern.
+            time: Time of state to be loaded.
+        """
+
+        data = xr.open_mfdataset(file)
+        with dask.config.set(**{'array.slicing.split_large_chunks': True}):
+            data = data.drop_duplicates('t')
+        data = data.sel(t=time, method='nearest').compute()
+        actual_time = data.t.item()
+        logger.info(f'Actual loaded sim time: {actual_time}')
+
+        coords = {
+            'x': self.local_grids['x'].squeeze(),
+            'z': self.local_grids['z'].squeeze(),
+        }
+        u = tools.insert_bc(data.u, 0, 0).interp(coords)
+        w = tools.insert_bc(data.w, 0, 0).interp(coords)
+        theta = tools.insert_bc(data.theta, 0.5, -0.5).interp(coords)
+        self.fields['u']['g'] = np.stack([u.data, w.data])
+        self.fields['theta']['g'] = theta.data
 
     def log_data(self, dir, save_sim_time, max_writes, timestep):
         """
