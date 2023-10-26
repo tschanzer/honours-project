@@ -488,11 +488,11 @@ class NonlinearHyperviscosity:
     boundary_conditions = property(noslip_isothermal)
     continuity_equation = property(divergence_free)
 
-    def __init__(self, model, hyper, delta_nu):
+    def __init__(self, model, hyper, delta):
         """Instantiates the equation class."""
         self.model = model
         self.hyper = hyper
-        self.delta_nu = delta_nu
+        self.delta = delta
 
     @property
     def damping(self):
@@ -500,9 +500,9 @@ class NonlinearHyperviscosity:
         a_plus = 26.
         model = self.model
         z = model.local_grids['z']
-        z_plus = np.minimum(z, 1 - z)/self.delta_nu
+        z_plus = np.minimum(z, 1 - z)/self.delta
         field = model.dist.Field(name='damping', bases=model.zbasis)
-        field['g'] = 1 - np.exp(-z_plus/a_plus)
+        field['g'] = (1 - np.exp(-z_plus/a_plus))**4
         return field
 
     @property
