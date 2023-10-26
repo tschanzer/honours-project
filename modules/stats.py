@@ -165,6 +165,82 @@ def reverse_running_mean(data, dim):
     )
 
 
+def rolling_mean_half_range(data, dim, width):
+    """
+    Calculate half the range of the rolling mean of an array.
+
+    Args:
+        data: xarray.DataArray.
+        dim: Dimension name.
+        width: Width of the rolling window in *data units*.
+
+    Returns:
+        (max - min)/2 of the rolling mean of the array.
+    """
+
+    delta = (data[dim][1] - data[dim][0]).item()
+    width_n = round(width/delta) + 1
+    mean = data.rolling({dim: width_n}).mean()
+    return (np.nanmax(mean) - np.nanmin(mean))/2
+
+
+def running_mean_half_range(data, dim, width):
+    """
+    Calculate half the range of the running mean of an array.
+
+    Args:
+        data: xarray.DataArray.
+        dim: Dimension name.
+        width: Minimum width of the window in *data units*.
+
+    Returns:
+        (max - min)/2 of the running mean of the array,
+        limited by the minimum window width.
+    """
+
+    mean = running_mean(data, dim)
+    mean = mean.isel({dim: mean[dim] >= mean[dim][0] + width})
+    return (mean.max() - mean.min())/2
+
+
+def uncertainty(data, dim, width):
+    """
+    Calculate the max of rolling and running mean half-ranges.
+
+    Args:
+        data: xarray.DataArray.
+        dim: Dimension name.
+        width: Width of the window in *data units*.
+
+    Returns:
+        Largest of running_mean_half_range and rolling_mean_half_range.
+    """
+
+    return np.maximum(
+        rolling_mean_half_range(data, dim, width),
+        running_mean_half_range(data, dim, width),
+    )
+
+
+def mean_and_uncertainty(data, dim, width):
+    """
+    Calculate the mean of a time series with uncertainty.
+
+    Args:
+        data: xarray.DataArray.
+        dim: Dimension name.
+        width: Width of the window in *data units*.
+
+    Returns:
+        Mean (over the last <width> data units) and uncertainty.
+    """
+
+    return (
+        data.isel({dim: data[dim] >= data[dim][-1] - width}).mean(dim),
+        uncertainty(data, dim, width),
+    )
+
+
 def autocorrelation(array, dim, max_lag, lag_step):
     """
     Calculate the autocorrelation of an array along a dimension.
