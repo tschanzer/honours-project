@@ -1,28 +1,32 @@
-# Resolution dependence experiments (up to 1024x128)
+# Resolution dependence experiments (up to 2048x256)
 
 base:
     equations:
-        class: !!python/name:modules.models.SmagorinskyLES
-        delta_nu: 2.2e-3
+        class: !!python/name:modules.models.NonlinearHyperviscosity
+        hyper: 2.0e-3
+        delta: 2.0e-3
     parameters:
         aspect: 8.0
-        nx: 1024
-        nz: 128
+        nx: 1024  # changes
+        nz: 128  # changes
         rayleigh: 1.0e+9
         prandtl: 1.0
     initial_condition:
-        type: interpolate_from_existing
+        type: interpolate
+        file: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/resolution_tests/1024x128/*.nc
+        time: 650.
     output:
         dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/resolution_tests/1024x128  # changes
         save_sim_time: 0.2
         max_writes: 300  # changes
     run:
-        sim_time: 200
+        sim_time: 350.
         timestep: 2.0e-3  # changes
     logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/resolution_tests/1024x128/1024x128.log  # changes
 
+
 runs:
-    - [2048, 256]
-    - [1792, 224]
-    - [1536, 192]
     - [1280, 160]
+    - [1536, 192]
+    - [1792, 224]
+    - [2048, 256]

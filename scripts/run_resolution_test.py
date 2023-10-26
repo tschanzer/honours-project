@@ -41,7 +41,7 @@ if __name__ == '__main__':
         new_config['parameters']['nx'] = new_nx
         new_config['parameters']['nz'] = new_nz
 
-        # Update output directory and logdile
+        # Update output directory and logfile
         name = f'{new_nx}x{new_nz}'
         out_dir = os.path.join(base_dir, name)
         new_config['output']['dir'] = out_dir
