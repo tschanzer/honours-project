@@ -3,6 +3,7 @@
 import numpy as np
 import scipy as sp
 import xarray as xr
+import string
 
 
 def tendency(state_t, state_tplusdt):
@@ -18,11 +19,14 @@ def tendency(state_t, state_tplusdt):
         (state_tplusdt - state_t)/dt.
     """
 
-    tend = (state_tplusdt.drop('t') - state_t.drop('t'))/state_t.timestep
+    tend = (
+        (state_tplusdt.drop('t') - state_t.drop('t'))
+        / (state_tplusdt.t.drop('t') - state_t.t.drop('t'))
+    )
     return tend.assign_coords({'t': state_t.t})
 
 
-def insert_bc(data, bottom, top, aspect=8):
+def insert_bc(data, bottom, top, aspect):
     """
     Inserts the boundary values into a DataArray.
 
@@ -37,16 +41,14 @@ def insert_bc(data, bottom, top, aspect=8):
     """
 
     # z=0 value
-    if bottom is not None:
-        z_bc = xr.DataArray([bottom], coords={'z': [0.]})
-        _, z_bc = xr.broadcast(data.isel(z=0), z_bc)
-        data = xr.concat([z_bc, data], dim='z')
+    z_bc = xr.DataArray([bottom], coords={'z': [0.]})
+    _, z_bc = xr.broadcast(data.isel(z=0), z_bc)
+    data = xr.concat([z_bc, data], dim='z')
 
     # z=1 value
-    if top is not None:
-        z_bc = xr.DataArray([top], coords={'z': [1.]})
-        _, z_bc = xr.broadcast(data.isel(z=0), z_bc)
-        data = xr.concat([data, z_bc], dim='z')
+    z_bc = xr.DataArray([top], coords={'z': [1.]})
+    _, z_bc = xr.broadcast(data.isel(z=0), z_bc)
+    data = xr.concat([data, z_bc], dim='z')
 
     # Periodic x value
     x_bc = data.sel(x=0).assign_coords({'x': aspect})
@@ -54,7 +56,7 @@ def insert_bc(data, bottom, top, aspect=8):
     return data
 
 
-def sample(data, x, z, bottom, top, aspect=8):
+def sample(data, x, z, bottom, top, aspect):
     """
     Samples a field at given points using linear interpolation.
 
@@ -70,6 +72,14 @@ def sample(data, x, z, bottom, top, aspect=8):
 
     data = insert_bc(data, bottom, top, aspect)
     return sp.interpolate.interpn(
-        (data.x.data, data.z.data), data.transpose('x', 'z', 't').data,
-        np.stack([x, z], axis=1), bounds_error=False, fill_value=None,
+        (data.x.data, data.z.data),
+        data.transpose('x', 'z', 't').data,
+        np.stack([x, z], axis=1),
     )
+
+
+def label_subplots(axes):
+    """Label subplots alphabetically."""
+    if axes.ndim > 1: axes = axes.ravel()
+    for i, ax in enumerate(axes):
+        ax.set_title(f'({string.ascii_lowercase[i]})', loc='left')
