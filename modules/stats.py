@@ -241,13 +241,12 @@ def mean_and_uncertainty(data, dim, width):
     )
 
 
-def autocorrelation(array, dim, max_lag, lag_step):
+def time_autocorrelation(array, max_lag, lag_step):
     """
-    Calculate the autocorrelation of an array along a dimension.
+    Calculate the spatially-averaged temporal autocorrelation.
 
     Args:
         data: xarray.DataArray.
-        dim: Dimension along which the autocorrelation is to be computed
         max_lag: Maximum lag for the autocorrelation.
         lag_step: Lag step size for the autocorrelation.
 
@@ -255,23 +254,28 @@ def autocorrelation(array, dim, max_lag, lag_step):
         xarray.DataArray.
     """
 
-    step = array[dim].diff(dim)
+    step = array.t.diff('t')
     if not np.allclose(step, step[0]):
         raise ValueError('Coordinate must have regular steps.')
+    step = step[0].item()
 
     # Number of grid points corresponding to one lag step
-    n_lag_step = int(round(lag_step/step[0].item()))
+    n_lag_step = round(lag_step/step)
     # Round lag step to the nearest multiple of grid spacing
-    lag_step = n_lag_step*step[0]
+    lag_step = n_lag_step*step
     # Number of lag steps needed to reach max_lag
     n_max_lag = int(max_lag//lag_step)
 
     result = []
     for n in range(n_max_lag + 1):
-        array1 = array.isel({dim: slice(n*n_lag_step, None)})
-        array2 = array.isel({dim: slice(0, array[dim].size - n*n_lag_step)})
-        result.append(xr.corr(array1.drop(dim), array2.drop(dim), dim))
-    result = xr.concat(result, f'{dim}_lag')
+        array1 = array.isel(t=slice(n*n_lag_step, None))
+        array2 = array.isel(t=slice(None, array['t'].size - n*n_lag_step))
+        corr = xr.corr(array1.drop('t'), array2.drop('t'), 't')
+        corr = corr.mean('x').integrate('z')/(array.z.max() - array.z.min())
+        result.append(corr.compute())
+
+    result = xr.concat(result, 't_lag')
     result = result.assign_coords(
-        {f'{dim}_lag': np.linspace(0, n_max_lag*lag_step, n_max_lag + 1)})
+        {'t_lag': np.linspace(0, n_max_lag*lag_step, n_max_lag + 1)}
+    )
     return result
