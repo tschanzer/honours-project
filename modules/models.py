@@ -225,11 +225,13 @@ class Model(ModelBase):
             'x': self.local_grids['x'].squeeze(),
             'z': self.local_grids['z'].squeeze(),
         }
-        u = tools.insert_bc(data.u, 0, 0).interp(coords)
-        w = tools.insert_bc(data.w, 0, 0).interp(coords)
-        theta = tools.insert_bc(data.theta, 0.5, -0.5).interp(coords)
-        self.fields['u']['g'] = np.stack([u.data, w.data])
-        self.fields['theta']['g'] = theta.data
+        data = tools.insert_bc(
+            data, bc={'u': (0, 0), 'w': (0, 0), 'theta': (1/2, -1/2)},
+            aspect=self.aspect,
+        )
+        data = data.interp(coords)
+        self.fields['u']['g'] = np.stack([data.u.data, data.w.data])
+        self.fields['theta']['g'] = data.theta.data
 
     def log_data(self, dir, save_sim_time, max_writes, timestep):
         """
