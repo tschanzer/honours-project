@@ -1,0 +1,23 @@
+truth:
+    equations: &eqns
+        class: !!python/name:modules.models.NonlinearHyperviscosity
+        hyper: 2.0e-3
+        delta: 2.0e-3
+    parameters:
+        aspect: 8.0
+        nx: 2048
+        nz: 256
+        rayleigh: 1.0e+9
+        prandtl: 1.0
+    initial_condition:
+        type: interpolate
+        file: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/fine/time_t/*.nc
+        time: 300.
+    output:
+        dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/truth
+        save_sim_time: 0.2
+        max_writes: 75
+    run:
+        sim_time: 300.
+        timestep: 1.0e-3
+    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/truth/truth.log
