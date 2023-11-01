@@ -25,3 +25,20 @@ fine:
         sim_time: 300.
         timestep: 1.0e-3
     logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/fine/fine.log
+
+coarse_graining_t:
+    parameters: &cg_params
+        aspect: 8.0
+        to_nx: 256
+        to_nz: 64
+        run_time: 1.0e-3
+        run_dt: 2.0e-4
+    input: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/fine/time_t/*.nc
+    output: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_t.nc
+    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_t.log
+
+coarse_graining_tplusdt:
+    parameters: *cg_params
+    input: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/fine/time_tplusdt/*.nc
+    output: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_tplusdt.nc
+    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_tplusdt.log
