@@ -123,7 +123,8 @@ def plot_z_dependence(
         x_data_sample = sample(x_data, x_sample, z_sample).ravel()
         y_data_sample = sample(y_data, x_sample, z_sample).ravel()
         hist, x, y, meshes.flat[i] = ax.hist2d(
-            x_data_sample, y_data_sample, norm='log', **hist2d_kwargs,
+            x_data_sample, y_data_sample, norm='log', rasterized=True,
+            **hist2d_kwargs,
         )
         hist_contour(ax, x, y, hist, sigma)
         ax.set(title=f'$z \\in [{z_min:.3f}, {z_max:.3f}]$')

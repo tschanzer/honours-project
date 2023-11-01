@@ -7,7 +7,7 @@ import os
 import yaml
 from mpi4py import MPI
 
-import run
+import run_model
 
 comm = MPI.COMM_WORLD
 rank = comm.rank
@@ -65,4 +65,4 @@ if __name__ == '__main__':
             except FileExistsError:
                 continue
 
-        run.run(new_config)
+        run_model.run(new_config)

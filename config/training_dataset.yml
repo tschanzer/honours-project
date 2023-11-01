@@ -1,7 +1,7 @@
 # Simulations for generating the training dataset
 
 fine:
-    equations:
+    equations: &eqns
         class: !!python/name:modules.models.NonlinearHyperviscosity
         hyper: 2.0e-3
         delta: 2.0e-3
@@ -42,3 +42,19 @@ coarse_graining_tplusdt:
     input: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/fine/time_tplusdt/*.nc
     output: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_tplusdt.nc
     logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_tplusdt.log
+
+coarse:
+    equations: *eqns
+    parameters:
+        aspect: 8.0
+        nx: 256
+        nz: 64
+        rayleigh: 1.0e+9
+        prandtl: 1.0
+    input: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_t.nc
+    output:
+        dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse
+        max_writes: 2400
+    run:
+        dt: 5.333e-3
+    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse/coarse.log
