@@ -3,28 +3,7 @@
 import numpy as np
 import xarray as xr
 
-
-def level_quantile(data, level, quantile, t_range, regridder):
-    """
-    Calculates a quantile of a variable at a given z level.
-
-    Args:
-        data: xarray.DataArray containing the variable of interest.
-        level: Vertical position at which to compute the quantile.
-        quantile: Desired quantile.
-        t_range: List of lower and upper time limits to consider.
-        regridder: Regridder object for coarsening the data.
-
-    Returns:
-        The requested quantile of the coarsened data for `z == level`,
-        `t_range[0] <= t <= t_range[1]`.
-    """
-
-    mask = (data.t >= t_range[0]) & (data.t >= t_range[1])
-    level_data = data.isel(t=mask).interp(z=level)
-    level_data = level_data.chunk({'t': -1, 'x': -1})
-    level_data = regridder(level_data)
-    return np.abs(level_data).quantile(quantile)
+from modules import tools
 
 
 def nusselt_number(data, rayleigh, prandtl):
@@ -119,6 +98,23 @@ def thermal_dissipation(data, rayleigh, prandtl):
     return dissipation
 
 
+def thermal_bl_thickness(data):
+    """
+    Calculate the mean thermal boundary layer thickness.
+
+    Mean is taken over time and x, and between the top and bottom
+    boundary layers.
+
+    Args:
+        data: xarray.Dataset.
+    """
+
+    profile = data.theta.mean(['x']).compute()
+    profile = tools.insert_bc(profile, (1/2, -1/2), aspect=None)
+    lapse_rate = -profile.differentiate('z', edge_order=2)
+    return (0.5/lapse_rate.sel(z=0.) + 0.5/lapse_rate.sel(z=1.))/2
+
+
 def _running_mean(data):
     mean = np.zeros_like(data)
     mean[..., 0] = data[..., 0]
@@ -203,25 +199,6 @@ def running_mean_half_range(data, dim, width):
     return (mean.max() - mean.min())/2
 
 
-def uncertainty(data, dim, width):
-    """
-    Calculate the max of rolling and running mean half-ranges.
-
-    Args:
-        data: xarray.DataArray.
-        dim: Dimension name.
-        width: Width of the window in *data units*.
-
-    Returns:
-        Largest of running_mean_half_range and rolling_mean_half_range.
-    """
-
-    return np.maximum(
-        rolling_mean_half_range(data, dim, width),
-        running_mean_half_range(data, dim, width),
-    )
-
-
 def mean_and_uncertainty(data, dim, width):
     """
     Calculate the mean of a time series with uncertainty.
@@ -235,10 +212,12 @@ def mean_and_uncertainty(data, dim, width):
         Mean (over the last <width> data units) and uncertainty.
     """
 
-    return (
-        data.isel({dim: data[dim] >= data[dim][-1] - width}).mean(dim),
-        uncertainty(data, dim, width),
+    mean = data.mean(dim)
+    uncertainty = np.maximum(
+        rolling_mean_half_range(data, dim, width),
+        running_mean_half_range(data, dim, width),
     )
+    return mean, uncertainty
 
 
 def time_autocorrelation(array, max_lag, lag_step):

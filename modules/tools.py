@@ -67,8 +67,18 @@ def insert_bc(data, bc, aspect):
     data = xr.concat([data, top], dim='z')
 
     # Periodic x value
-    x_bc = data.sel(x=0).assign_coords({'x': aspect})
-    data = xr.concat([data, x_bc], dim='x')
+    if aspect is not None:
+        x_bc = data.sel(x=0).assign_coords({'x': aspect})
+        data = xr.concat([data, x_bc], dim='x')
+
+    # Rechunk z dimension if necessary:
+    rechunk = any([
+        isinstance(data, xr.DataArray) and data.chunks is not None,
+        isinstance(data, xr.Dataset)
+        and data.chunks != xr.core.utils.Frozen({}),
+    ])
+    if rechunk: data = data.chunk({'x': -1, 'z': -1})
+
     return data
 
 
