@@ -1,4 +1,5 @@
 """Module for simulating Rayleigh-Bénard convection."""
+# pylint: disable=no-member, too-many-arguments, too-many-instance-attributes
 
 from functools import wraps
 import logging
@@ -14,7 +15,6 @@ from modules import coarse_graining, tools
 
 logger = logging.getLogger(__name__)
 RNG_SEED = 0
-# pylint: disable=no-member, too-many-arguments, too-many-instance-attributes
 
 
 class ModelBase:
@@ -354,7 +354,7 @@ class SingleStepModel(ModelBase):
 
         self.initial_states = xr.open_mfdataset(file)
 
-    def log_final_states(self, dir, max_writes):
+    def configure_output(self, dir, max_writes):
         """
         Tells the solver where to save the time-stepped output.
 

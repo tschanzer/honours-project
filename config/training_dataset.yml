@@ -34,14 +34,18 @@ coarse_graining_t:
         run_time: 1.0e-3
         run_dt: 2.0e-4
     input: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/fine/time_t/*.nc
-    output: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_t.nc
-    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_t.log
+    output:
+        dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_t
+        max_writes: 2400
+    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_t/time_t.log
 
 coarse_graining_tplusdt:
     parameters: *cg_params
     input: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/fine/time_tplusdt/*.nc
-    output: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_tplusdt.nc
-    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_tplusdt.log
+    output:
+        dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_tplusdt
+        max_writes: 2400
+    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_tplusdt/time_tplusdt.log
 
 coarse:
     equations: *eqns
@@ -51,7 +55,7 @@ coarse:
         nz: 64
         rayleigh: 1.0e+9
         prandtl: 1.0
-    input: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_t.nc
+    input: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse_grained/time_t/*.nc
     output:
         dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coarse
         max_writes: 2400

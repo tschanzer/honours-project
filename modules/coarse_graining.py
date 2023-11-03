@@ -1,32 +1,39 @@
 """Module for coarse-graining high-resolution data."""
+# pylint: disable=no-member
+
+import logging
 
 import dedalus.public as d3
 import numpy as np
 import scipy as sp
 import xarray as xr
 
+logger = logging.getLogger(__name__)
+
 
 class CoarseGrainer:
     """Diffusion model for coarse-graining high-resolution data."""
-    def __init__(self, aspect, Nx, Nz):
+    def __init__(self, file, aspect):
         """
         Builds the solver.
 
         Args:
+            file: Path or glob pattern for high-res input data.
             aspect: Domain aspect ratio.
-            Nx: Number of horizontal modes.
-            Nz: Number of vertical modes.
         """
 
-        self.Nx = Nx
-        self.Nz = Nz
+        self.input = xr.open_mfdataset(file)
+        self.nx = self.input.x.size
+        self.nz = self.input.z.size
+        self.snapshots = None
+        self.out_shape = None
 
         # Fundamental objects
         coords = d3.CartesianCoordinates('x', 'z')
         dist = d3.Distributor(coords, dtype=np.float64)
-        xbasis = d3.RealFourier(coords['x'], size=Nx, bounds=(0, aspect))
-        zbasis = d3.ChebyshevT(coords['z'], size=Nz, bounds=(0, 1))
-        _, z_hat = coords.unit_vector_fields(dist)
+        xbasis = d3.RealFourier(coords['x'], size=self.nx, bounds=(0, aspect))
+        zbasis = d3.ChebyshevT(coords['z'], size=self.nz, bounds=(0, 1))
+        _, z_hat = coords.unit_vector_fields(dist)  # pylint: disable=W0632
 
         # Fields
         self.fields = {
@@ -88,42 +95,68 @@ class CoarseGrainer:
         # Solver
         self.solver = problem.build_solver(d3.RK222)
 
-    def run(self, u, w, theta, time, dt, to_shape=None):
+    def configure_output(self, resolution, out_dir, max_writes):
         """
-        Smooths a state by running the solver.
+        Tells the solver where to save the output.
 
         Args:
-            u, w, theta: np.ndarray.
-            time: Run time (i.e. amount of smoothing)
-            to_shape: Output resolution.
-
-        Returns:
-            Smoothed u, w and theta.
+            resolution: Output resolution.
+            dir: Directory for data output.
+            max_writes: Maximum number of writes per output file
+                (default 1000).
         """
 
-        # Zero all fields just to be safe
-        for field in self.fields:
-            self.fields[field]['g'] = 0
+        self.out_shape = resolution
+        # Omit iter argument to add_file_handler to disable auto evaluation
+        self.snapshots = self.solver.evaluator.add_file_handler(
+            out_dir, max_writes=max_writes,
+        )
+        new_scales = (resolution[0]/self.nx, resolution[1]/self.nz)
+        self.snapshots.add_tasks(
+            [self.fields['u'], self.fields['theta']],
+            layout='g', scales=new_scales,
+        )
 
-        # Load initial condition
-        self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
-        self.fields['theta'].load_from_global_grid_data(theta)
+    def run(self, time, dt):
+        """
+        Smooths the input data by running the solver.
 
-        # Run until stop time is reached
-        run_time = 0
-        while run_time < time:
-            self.solver.step(dt)
-            run_time += dt
+        Args:
+            time: Run time (i.e. amount of smoothing)
+            dt: Time step.
+        """
 
-        # Return final state
-        if to_shape is None:
-            to_shape = (self.Nx, self.Nz)
-        new_scales = (to_shape[0]/self.Nx, to_shape[1]/self.Nz)
-        self.fields['u'].change_scales(new_scales)
-        self.fields['theta'].change_scales(new_scales)
-        u_data = self.fields['u'].allgather_data('g')
-        theta_data = self.fields['theta'].allgather_data('g')
-        return u_data[0,:,:], u_data[1,:,:], theta_data
+        for i in range(self.input.t.size):
+            if i % 10 == 0:
+                logger.info(f'Step {i+1:d} of {self.input.t.size}')
+
+            # Zero all fields just to be safe
+            for field in self.fields.values():
+                field['g'] = 0
+
+            # Load initial condition
+            u = self.input.u.isel(t=i).compute()
+            w = self.input.w.isel(t=i).compute()
+            theta = self.input.theta.isel(t=i).compute()
+            self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
+            self.fields['theta'].load_from_global_grid_data(theta)
+
+            # Run until stop time is reached
+            run_time = 0.
+            while run_time < time:
+                self.solver.step(dt)
+                run_time += dt
+
+            # Save the model state after the timestep, recording
+            # iteration number, sim time and time step from *original*
+            # data
+            self.solver.evaluator.evaluate_handlers(
+                [self.snapshots],
+                iteration=self.input.iteration[i],
+                wall_time=self.solver.wall_time,
+                sim_time=self.input.sim_time[i],
+                timestep=self.input.timestep[i],
+            )
 
 
 class ConservativeRegridder:
