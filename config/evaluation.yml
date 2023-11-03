@@ -21,3 +21,88 @@ truth:
         sim_time: 300.
         timestep: 1.0e-3
     logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/truth/truth.log
+
+coarse_graining:
+    parameters:
+        aspect: 8.0
+        to_nx: 256
+        to_nz: 64
+        run_time: 1.0e-3
+        run_dt: 2.0e-4
+    input: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/truth/*.nc
+    output:
+        dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/coarse_grained
+        max_writes: 2400
+    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/coarse_grained/coarse_grained.log
+
+control: &control
+    equations: *eqns
+    parameters: &control_params
+        aspect: 8.0
+        nx: 256
+        nz: 64
+        rayleigh: 1.0e+9
+        prandtl: 1.0
+    initial_condition: &control_init
+        type: interpolate
+        file: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/coarse_grained/*.nc
+        time: 0.
+    output:
+        dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/control
+        save_sim_time: 0.2
+        max_writes: 2400
+    run: &control_run
+        sim_time: 300.
+        timestep: 5.333e-3
+    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/control/control.log
+
+parametrised: &parametrised
+    equations:
+        class: !!python/name:modules.models.ResolvedTendencyParametrisation
+        hyper: 2.0e-3
+        delta: 2.0e-3
+        coef_file: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/training_data/coefficients_theta_only.csv
+    parameters: *control_params
+    initial_condition: *control_init
+    output:
+        dir: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/parametrised
+        save_sim_time: 0.2
+        max_writes: 2400
+    run: *control_run
+    logfile: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/parametrised/parametrised.log
+
+parametrised_restart:
+    <<: *parametrised
+    initial_condition:
+        type: restart
+        file: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/parametrised/restart/restart_s1.h5
+    run:
+        <<: *control_run
+        sim_time: 800.
+
+control_restart:
+    <<: *control
+    initial_condition:
+        type: restart
+        file: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/control/restart/restart_s1.h5
+    run:
+        <<: *control_run
+        sim_time: 800.
+
+parametrised_restart2:
+    <<: *parametrised
+    initial_condition:
+        type: restart
+        file: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/parametrised/restart/restart_s2.h5
+    run:
+        <<: *control_run
+        sim_time: 1100.
+
+control_restart2:
+    <<: *control
+    initial_condition:
+        type: restart
+        file: /srv/ccrc/AtmSS/z5310829/honours_project/final_data/evaluation/control/restart/restart_s2.h5
+    run:
+        <<: *control_run
+        sim_time: 1100.

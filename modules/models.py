@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from modules import coarse_graining, tools
+from modules import tools
 
 logger = logging.getLogger(__name__)
 RNG_SEED = 0
@@ -175,35 +175,6 @@ class Model(ModelBase):
         """Loads a model state from a restart file."""
         self.solver.load_state(file)
         self.restarted = True
-
-    def coarse_grain_from_existing(self, file, time, filter_time, filter_dt):
-        """
-        Coarse-grains and loads the state from an existing model run.
-
-        Args:
-            file: NetCDF data file or glob pattern.
-            time: Time of state to be loaded.
-            filter_time: Run time of diffusion model for smoothing.
-            filter_dt: Time step of diffusion model.
-        """
-
-        data = xr.open_mfdataset(file)
-        with dask.config.set(**{'array.slicing.split_large_chunks': True}):
-            data = data.drop_duplicates('t')
-        data = data.sel(t=time, method='nearest').compute()
-        actual_time = data.t.item()
-        logger.info(f'Actual loaded sim time: {actual_time}')
-
-        filter = coarse_graining.CoarseGrainer(
-            self.aspect, data.x.size, data.z.size)
-
-        u, w, theta = filter.run(
-            data.u, data.w, data.theta,
-            time=filter_time, dt=filter_dt,
-            to_shape=(self.nx, self.nz),
-        )
-        self.fields['u'].load_from_global_grid_data(np.stack([u, w]))
-        self.fields['theta'].load_from_global_grid_data(theta)
 
     def interp_from_existing(self, file, time):
         """
@@ -381,8 +352,8 @@ class SingleStepModel(ModelBase):
         try:
             for i in range(self.initial_states.t.size):
                 # Zero all fields just to be safe
-                for field in self.fields:
-                    self.fields[field]['g'] = 0
+                for field in self.fields.values():
+                    field['g'] = 0
 
                 # Load the next snapshot into the solver
                 u = self.initial_states.u.isel(t=i).compute()
@@ -633,14 +604,14 @@ class SmagorinskyLES:
         return lhs, rhs
 
 
-class ResolvedTendencyParametrisation(SmagorinskyLES):
+class ResolvedTendencyParametrisation(NonlinearHyperviscosity):
     """Parametrisation scheme based on resolved tendencies."""
 
     gauge_condition = property(zero_gauge)
     boundary_conditions = property(noslip_isothermal)
     continuity_equation = property(divergence_free)
 
-    def __init__(self, model, delta_nu, coef_file):
+    def __init__(self, model, hyper, delta, coef_file):
         """
         Initialises the parametrisation scheme.
 
@@ -650,7 +621,7 @@ class ResolvedTendencyParametrisation(SmagorinskyLES):
             coef_file: Path to csv file with parametrisation coefficients.
         """
 
-        super().__init__(model, delta_nu)
+        super().__init__(model, hyper, delta)
         self.params = pd.read_csv(coef_file)
 
     @property
@@ -659,26 +630,28 @@ class ResolvedTendencyParametrisation(SmagorinskyLES):
         model = self.model
         nu = np.sqrt(model.prandtl/model.rayleigh)
         lap_u = d3.div(model.substitutions['grad_u'])
-        subgrid_stress = 2*self.eddy_viscosity*self.strain_tensor
 
         coeffs_u = self.params['u'].to_numpy()
         coeffs_w = self.params['w'].to_numpy()
         # Add 1 to the zeroth-order-in-z coefficient because we are adding
         # the subgrid tendency to the resolved tendency
-        coeffs_u[1] += 1
-        coeffs_w[1] += 1
+        coeffs_u[0] += 1
+        coeffs_w[0] += 1
 
         z = model.dist.Field(name='z', bases=model.zbasis)
         z['g'] = model.local_grids['z']
-
-        u_func = sum([
-            coeffs_u[n+1]*(z - 1/2)**(2*n) for n in range(coeffs_u.size - 1)
-        ])
-        u_func = u_func.evaluate()
-        w_func = sum([
-            coeffs_w[n+1]*(z - 1/2)**(2*n) for n in range(coeffs_w.size - 1)
-        ])
-        w_func = w_func.evaluate()
+        u_func = sum(
+            coeffs_u[n]*(z - 1/2)**(2*n) for n in range(coeffs_u.size)
+        )
+        if u_func != 1.:
+            # u_func == 1 when u is unparametrised
+            u_func = u_func.evaluate()
+        w_func = sum(
+            coeffs_w[n]*(z - 1/2)**(2*n) for n in range(coeffs_w.size)
+        )
+        if w_func != 1.:
+            # w_func == 1 when u is unparametrised
+            w_func = w_func.evaluate()
 
         # Form a 2x2 matrix with u_func and w_func along the diagonal.
         # This can then be multiplied with the resolved tendency vector
@@ -688,22 +661,15 @@ class ResolvedTendencyParametrisation(SmagorinskyLES):
             + w_func*model.unit_vectors['z_hat']*model.unit_vectors['z_hat']
         )
 
-        lhs = (
-            d3.dt(model.fields['u'])
-            + uw_func @ (
-                - nu*lap_u
-                + d3.grad(model.fields['pi'])
-                - model.fields['theta']*model.unit_vectors['z_hat']
-                + model.substitutions['lift'](model.fields['tau_u2'])
-            )
+        lhs = d3.dt(model.fields['u']) + uw_func @ (
+            - nu*lap_u
+            + d3.grad(model.fields['pi'])
+            - model.fields['theta']*model.unit_vectors['z_hat']
+            + model.substitutions['lift'](model.fields['tau_u2'])
         )
-        rhs = (
-            # coeffs_u[0]*self.unit_vectors['x_hat']  # constant u term
-            # + coeffs_w[0]*self.unit_vectors['z_hat']  # constant w term
-            uw_func @ (
-                -model.fields['u']@model.substitutions['grad_u']
-                + d3.div(subgrid_stress)
-            )
+        rhs = uw_func @ (
+            -model.fields['u']@model.substitutions['grad_u']
+            + nu*self.hyper*self.damping*(lap_u@lap_u)**(1/2)*lap_u
         )
         return lhs, rhs
 
@@ -713,33 +679,25 @@ class ResolvedTendencyParametrisation(SmagorinskyLES):
         model = self.model
         kappa = 1/np.sqrt(model.rayleigh*model.prandtl)
         lap_theta = d3.div(model.substitutions['grad_theta'])
-        subgrid_flux = self.eddy_viscosity*model.substitutions['grad_theta']
 
         coeffs = self.params['theta'].to_numpy()
         # Add 1 to the zeroth-order-in-z coefficient because we are adding
         # the subgrid tendency to the resolved tendency
-        coeffs[1] += 1
+        coeffs[0] += 1
 
         z = model.dist.Field(name='z', bases=model.zbasis)
         z['g'] = model.local_grids['z']
-
-        func = sum([
-            coeffs[n+1]*(z - 1/2)**(2*n) for n in range(coeffs.size - 1)
-        ])
+        func = sum(
+            coeffs[n]*(z - 1/2)**(2*n) for n in range(coeffs.size)
+        )
         func = func.evaluate()
 
-        lhs = (
-            d3.dt(model.fields['theta'])
-            + func * (
-                - kappa*lap_theta
-                + model.substitutions['lift'](model.fields['tau_theta2'])
-            )
+        lhs = d3.dt(model.fields['theta']) + func * (
+            - kappa*lap_theta
+            + model.substitutions['lift'](model.fields['tau_theta2'])
         )
-        rhs = (
-            # coeffs[0]
-            func * (
-                -model.fields['u']@model.substitutions['grad_theta']
-                + d3.div(subgrid_flux)
-            )
+        rhs = func * (
+            -model.fields['u']@model.substitutions['grad_theta']
+            + kappa*self.hyper*self.damping*abs(lap_theta)*lap_theta
         )
         return lhs, rhs

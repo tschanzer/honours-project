@@ -9,12 +9,25 @@ import yaml
 
 from modules import models
 
-comm = MPI.COMM_WORLD
+comm = MPI.COMM_WORLD  # pylint: disable=I1101
 rank = comm.rank
 size = comm.size
 
+logger = logging.root
+if rank == 0:
+    logger.setLevel(logging.INFO)
+else:
+    logger.setLevel(logging.CRITICAL + 1)  # disable logging entirely
+formatter = logging.Formatter(
+    f'%(asctime)s %(name)s {rank}/{size} %(levelname)s :: %(message)s'
+)
 
-def run(config):
+# Dedalus adds a StreamHandler to the root logger so we need to remove it
+for h in logger.handlers:
+    logger.removeHandler(h)
+
+
+def run(conf):
     """
     Run a simulation using a configuration dictionary.
 
@@ -23,48 +36,37 @@ def run(config):
     """
 
     comm.Barrier()
-    logger = logging.getLogger()
-    if rank == 0:
-        logger.setLevel(logging.INFO)
-    else:
-        logger.setLevel(logging.CRITICAL + 1)  # disable logging entirely
-
-    # Dedalus adds a StreamHandler to the root logger so we need to remove it
-    for h in logging.root.handlers:
-        logging.root.removeHandler(h)
-
-    handler = logging.FileHandler(config['logfile'])
-    formatter = logging.Formatter(
-        '%(asctime)s %(name)s {}/{} %(levelname)s :: %(message)s'
-        .format(rank, size)
-    )
+    handler = logging.FileHandler(conf['logfile'])
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    logger.info(' Configuration ')
-    logger.info('===============\n' + yaml.dump(config).rstrip('\n'))
 
-    equations = config['equations'].pop('class')
+    if conf['initial_condition']['type'] == 'restart':
+        logger.info('========================')
+        logger.info('| Simulation restarted |')
+        logger.info('========================')
+    logger.info(' Configuration ')
+    logger.info('===============\n%s', yaml.dump(conf).rstrip('\n'))
+
+    equations = conf['equations'].pop('class')
     model = models.Model(
-        equations=equations, **config['parameters'], **config['equations'],
+        equations=equations, **conf['parameters'], **conf['equations'],
     )
 
-    match config['initial_condition'].pop('type'):
+    match conf['initial_condition'].pop('type'):
         case 'prescribed':
             model.set_initial_conditions()
         case 'restart':
-            model.restart(**config['initial_condition'])
-        case 'coarse_grain':
-            model.coarse_grain_from_existing(**config['initial_condition'])
+            model.restart(**conf['initial_condition'])
         case 'interpolate':
-            model.interp_from_existing(**config['initial_condition'])
+            model.interp_from_existing(**conf['initial_condition'])
         case _:
             raise ValueError('Invalid initial condition type')
 
-    model.log_data(**config['output'], timestep=config['run']['timestep'])
-    if 'pair_output' in config:
-        model.log_data_plusdt(**config['pair_output'])
+    model.log_data(**conf['output'], timestep=conf['run']['timestep'])
+    if 'pair_output' in conf:
+        model.log_data_plusdt(**conf['pair_output'])
 
-    model.run(**config['run'])
+    model.run(**conf['run'])
 
 
 if __name__ == '__main__':
@@ -75,7 +77,7 @@ if __name__ == '__main__':
     parser.add_argument('-k', '--key', help='Top-level config key')
     args = parser.parse_args()
 
-    with open(args.config, 'r') as f:
+    with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.load(f, yaml.UnsafeLoader)
 
     if args.key is not None:
@@ -83,7 +85,7 @@ if __name__ == '__main__':
 
     # Create the output directory so the logfile can be created
     if rank == 0:
-        if config['initial_condition'] != 'restart':
+        if config['initial_condition']['type'] != 'restart':
             os.mkdir(config['output']['dir'])
 
     run(config)
