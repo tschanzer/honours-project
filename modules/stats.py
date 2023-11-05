@@ -258,3 +258,22 @@ def time_autocorrelation(array, max_lag, lag_step):
         {'t_lag': np.linspace(0, n_max_lag*lag_step, n_max_lag + 1)}
     )
     return result
+
+
+def rmse(test, truth):
+    """
+    Root-mean-square error between two datasets, mean taken over space.
+
+    Args:
+        data1, data2: xr.DataArray or xr.Dataset.
+
+    Returns:
+        xr.DataArray or xr.Dataset.
+    """
+
+    truth = truth.interp(t=test.t)
+    squared_error = (test - truth)**2
+    z = squared_error.z
+    mean_squared_error = squared_error.mean('x').integrate('z')
+    mean_squared_error /= (z.max() - z.min()).item()
+    return np.sqrt(mean_squared_error)
