@@ -33,17 +33,37 @@ The ~109 GB of raw data needed to run the notebooks in
 `honours-project/final_notebooks` and reproduce the figures in the
 thesis are split across three Zenodo records with the following DOIs:
 
-1. [10.5281/zenodo.10090744](https://doi.org/10.5281/zenodo.10090744):
-    `resolution_tests_part1.zip`
-2. [10.5281/zenodo.10090882](https://doi.org/10.5281/zenodo.10090882):
-    `resolution_tests_part2.zip`
-3. [10.5281/zenodo.10090902](https://doi.org/10.5281/zenodo.10090902):
-    `training.zip`, `evaluation.zip`
+1. [10.5281/zenodo.10090744](https://doi.org/10.5281/zenodo.10090744)
+2. [10.5281/zenodo.10093567](https://doi.org/10.5281/zenodo.10093567)
+3. [10.5281/zenodo.10094438](https://doi.org/10.5281/zenodo.10094438)
 
 In order to run the notebooks, you will need to extract these archives
-into a new directory `honours-project/final_data`, merge the contents
-of `resolution_tests_part1.zip` and `resolution_tests_part2.zip` into a
-single directory named `resolution_tests`, and change all instances of
+and organise the directories they contain into the following structure:
+```
+final_data
+|--resolution_tests
+|  |--256x64
+|  |--512x64
+|  |--768x96
+|  |--1024x128
+|  |--1280x160
+|  |--1536x192
+|  |--1792x224
+|  |--2048x256
+|--training_data
+|  |--coarse
+|  |--coarse_grained
+|  |--fine
+|  |--coefficients.csv
+|  |--coefficients_theta_only.csv
+|--evaluation
+|  |--truth
+|  |--coarse_grained
+|  |--conrol
+|  |--parametrised
+```
+You will
+also need to change all instances of
 ```python
 base_path = '/srv/ccrc/AtmSS/z5310829/honours_project/'
 ```
